@@ -42,19 +42,27 @@ Service:
 
 ## Build
 
-The supported Pixi workflow for ROS 2 Humble assumes Ubuntu 22.04 or another Linux system with a standard ROS underlay at `/opt/ros/humble`.
+This repository now follows Pixi's ROS 2 tutorial model directly: ROS 2 Humble is installed into the Pixi environment from the `robostack-humble` channel instead of depending on a separately installed system underlay.
 
-Install the Python and ML stack through Pixi:
+Install the environment and project Python dependencies through Pixi:
 
 ```bash
 pixi install
 pixi run install-python-deps
 ```
 
-Then build the ROS package through the Pixi ROS task:
+The Pixi manifest includes:
+
+- `robostack-humble` and `conda-forge` channels
+- `python 3.11`
+- `ros-humble-desktop`
+- `colcon-common-extensions`
+- `setuptools<=58.2.0`
+
+Then build the local ROS package through Pixi:
 
 ```bash
-pixi run ros-build
+pixi run build
 ```
 
 ROS-side dependencies are declared in `package.xml`:
@@ -65,7 +73,7 @@ ROS-side dependencies are declared in `package.xml`:
 - `launch`
 - `launch_ros`
 
-The Linux ROS tasks source `/opt/ros/humble/setup.bash` automatically and then source the local workspace overlay from `install/setup.bash` when it exists.
+After `pixi run build`, the run tasks source the local workspace overlay from `install/setup.bash` on Linux or `install/setup.bat` on Windows before starting the node.
 
 ## Run
 
@@ -114,4 +122,4 @@ ros2 service call /voice_chatbot/clear_history std_srvs/srv/Trigger "{}"
 - The node serializes requests through a worker thread so the underlying LLM wrapper is used from one place at a time.
 - In voice mode, the node clears queued microphone audio and resets VAD after TTS playback to reduce self-triggering.
 - The same config caveats still apply: the default project configuration is Finnish-first, and model files must already exist at the configured paths.
-- `pixi run ros-build`, `pixi run ros-run`, and `pixi run ros-launch` are Linux/Humble-oriented tasks. The Windows `install.bat` flow remains focused on the desktop app.
+- The ROS tasks are now Pixi-native on both Linux and Windows, following the Robostack-based workflow from the Pixi ROS 2 tutorial.

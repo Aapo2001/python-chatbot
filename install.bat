@@ -54,7 +54,10 @@ echo   1. Download models:    pixi run setup-models
 echo   2. Start chatbot:
 echo        GUI mode:         pixi run app
 echo        Terminal mode:    pixi run chatbot
-echo   3. Optional shell:     pixi shell
+echo   3. ROS 2 Humble (optional):
+echo        Build package:    pixi run build
+echo        Run node:         pixi run ros-run
+echo   4. Optional shell:     pixi shell
 echo.
 pause
 exit /b 0

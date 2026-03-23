@@ -1,29 +1,35 @@
 [workspace]
 name = "voice-chatbot"
-channels = ["conda-forge"]
+channels = ["robostack-humble", "conda-forge"]
 platforms = ["win-64", "linux-64"]
 description = "Local voice chatbot with GUI, CLI, and optional ROS 2 integration."
 readme = "README.md"
 requires-pixi = ">=0.40"
 
 [dependencies]
-python = "3.10.*"
+python = "3.11.*"
 pip = "*"
 cmake = "*"
 git = "*"
 ninja = "*"
+colcon-common-extensions = "*"
+setuptools = "<=58.2.0"
+ros-humble-desktop = "*"
 
 [tasks]
 app = "python app.py"
 chatbot = "python chatbot.py"
 setup-models = "python setup_models.py"
+build = "colcon build --symlink-install --packages-select voice_chatbot_ros"
 
 [target.win-64.tasks]
 install-python-deps = "cmd /d /c tools\\install_python_windows.bat"
+ros-node = { cmd = "cmd /d /c tools\\ros_run_pixi.bat", depends-on = ["build"] }
+ros-run = { cmd = "cmd /d /c tools\\ros_run_pixi.bat", depends-on = ["build"] }
+ros-launch = { cmd = "cmd /d /c tools\\ros_launch_pixi.bat", depends-on = ["build"], env = { VOICE_LOOP = "false", TTS_PLAYBACK = "true" } }
 
 [target.linux-64.tasks]
 install-python-deps = "bash tools/install_python_linux.sh"
-ros-build = "bash tools/ros_build_humble.sh"
-ros-node = "bash tools/ros_run_humble.sh"
-ros-run = "bash tools/ros_run_humble.sh"
-ros-launch = "bash tools/ros_launch_humble.sh"
+ros-node = { cmd = "bash tools/ros_run_pixi.sh", depends-on = ["build"] }
+ros-run = { cmd = "bash tools/ros_run_pixi.sh", depends-on = ["build"] }
+ros-launch = { cmd = "bash tools/ros_launch_pixi.sh", depends-on = ["build"], env = { VOICE_LOOP = "false", TTS_PLAYBACK = "true" } }

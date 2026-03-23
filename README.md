@@ -38,6 +38,7 @@ The GUI wraps this pipeline in a background `QThread` and exposes model and runt
 | `pixi.toml` | Pixi workspace manifest for the base toolchain and common tasks |
 | `pixi.lock` | Resolved Pixi lockfile for the base environment |
 | `tools/install_python_windows.bat` | Pixi bootstrap script for CUDA-enabled Python packages |
+| `tools/install_python_linux.sh` | Pixi bootstrap script for Linux Python packages |
 | `config.json` | Persisted GUI configuration |
 | `voice_chatbot_ros/` | ROS 2 Humble package and node implementation |
 | `launch/` | ROS 2 launch file |
@@ -59,7 +60,7 @@ The code can fall back to CPU for some components, but the intended deployment i
 
 ## Installation
 
-The recommended setup path is now Pixi. The repository ships with a `pixi.toml` workspace manifest plus a Windows bootstrap script that installs the CUDA-specific Python packages inside the Pixi environment.
+The recommended setup path is now Pixi. The repository ships with a `pixi.toml` workspace manifest and uses Pixi to install both the base Python toolchain and the ROS 2 Humble packages.
 
 ### 1. System prerequisites
 
@@ -68,7 +69,6 @@ The recommended setup path is now Pixi. The repository ships with a `pixi.toml` 
 - CUDA Toolkit if you want GPU acceleration for PyTorch and `llama-cpp-python`
 - CMake and a working build toolchain for Python packages with native extensions
 - Microphone and speakers/headphones configured as default audio devices
-- For ROS 2 Humble on Linux: a system ROS install under `/opt/ros/humble`
 
 ### 2. Create the Pixi environment and install packages
 
@@ -86,11 +86,14 @@ What the script does:
 
 The Pixi workspace provides:
 
-- Python 3.10
+- Python 3.11
 - `pip`
 - `cmake`
 - `git`
 - `ninja`
+- `colcon-common-extensions`
+- `setuptools<=58.2.0`
+- `ros-humble-desktop`
 
 The bootstrap task installs:
 
@@ -146,7 +149,7 @@ ROS 2 Humble node:
 pixi run ros-run /absolute/path/to/config.json
 ```
 
-This Pixi ROS workflow is intended for Linux systems with ROS 2 Humble installed under `/opt/ros/humble`.
+This follows Pixi's ROS 2 workflow with `robostack-humble` packages installed into the Pixi environment.
 
 ## Configuration
 
@@ -195,8 +198,7 @@ Behavior details from the current code:
 - Audio device selection is not exposed; capture and playback use the default system devices through `sounddevice`.
 - The code and UI text are partly Finnish and partly English.
 - Model initialization happens synchronously inside the worker or CLI startup path, so startup cost depends on model size.
-- ROS 2 support assumes the ROS Python packages and the ML/audio dependencies are available in the same runtime environment.
-- The Pixi ROS tasks assume a Linux ROS 2 Humble underlay at `/opt/ros/humble/setup.bash`.
+- ROS 2 support assumes the Robostack Humble packages and the ML/audio dependencies can coexist in the same Pixi environment.
 
 ## Suggested First Run
 

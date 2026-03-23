@@ -20,7 +20,4 @@ python -m pip install --upgrade pywhispercpp --no-cache-dir
 echo "[pixi] Installing remaining project requirements..."
 python -m pip install --upgrade -r requirements.txt
 
-echo "[pixi] Installing ROS build tooling into the Pixi environment..."
-python -m pip install --upgrade colcon-common-extensions
-
 echo "[pixi] Linux Python dependency bootstrap complete."
