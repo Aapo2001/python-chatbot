@@ -8,6 +8,33 @@ import sys
 import traceback
 from pathlib import Path
 
+from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from config import Config
+
 # ── CUDA DLL setup (must run before any CUDA-dependent imports) ────
 _cuda_path = os.environ.get("CUDA_PATH", r"D:\cuda")
 for _p in [os.path.join(_cuda_path, "bin", "x64"), os.path.join(_cuda_path, "bin")]:
@@ -15,39 +42,21 @@ for _p in [os.path.join(_cuda_path, "bin", "x64"), os.path.join(_cuda_path, "bin
         os.add_dll_directory(_p)
         os.environ["PATH"] = _p + os.pathsep + os.environ.get("PATH", "")
 
-from PySide6.QtWidgets import (
-    QApplication,
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QSplitter,
-    QLabel,
-    QPushButton,
-    QComboBox,
-    QSpinBox,
-    QDoubleSpinBox,
-    QLineEdit,
-    QFileDialog,
-    QGroupBox,
-    QScrollArea,
-    QPlainTextEdit,
-    QTextEdit,
-    QFormLayout,
-    QCheckBox,
-    QSizePolicy,
-)
-from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer
-from PySide6.QtGui import QFont, QTextCursor, QColor, QIcon
-
-from config import Config
 
 # ── Constants ──────────────────────────────────────────────────────
 
 WHISPER_MODELS = [
-    "tiny", "tiny.en", "base", "base.en",
-    "small", "small.en", "medium", "medium.en",
-    "large-v1", "large-v2", "large-v3",
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "medium",
+    "medium.en",
+    "large-v1",
+    "large-v2",
+    "large-v3",
 ]
 
 LANGUAGES = {
@@ -143,22 +152,27 @@ class ChatbotWorker(QThread):
 
             self.log.emit("[Init] Audio I/O...")
             from audio_io import AudioIO
+
             audio = AudioIO(self._config)
 
             self.log.emit("[Init] Silero-VAD...")
             from vad import VoiceActivityDetector
+
             vad = VoiceActivityDetector(self._config)
 
             self.log.emit("[Init] Whisper STT...")
             from stt import SpeechToText
+
             stt = SpeechToText(self._config)
 
             self.log.emit("[Init] LLM...")
             from llm import ChatLLM
+
             llm = ChatLLM(self._config)
 
             self.log.emit("[Init] Coqui TTS...")
             from tts_engine import TextToSpeech
+
             tts = TextToSpeech(self._config)
 
             self.log.emit("Kaikki mallit ladattu onnistuneesti!")
@@ -218,7 +232,7 @@ class ChatbotWorker(QThread):
 
             if torch.cuda.is_available():
                 name = torch.cuda.get_device_name(0)
-                vram = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                 self.log.emit(f"GPU: {name} ({vram:.1f} GB)")
                 self.log.emit(f"CUDA: {torch.version.cuda}")
             else:
@@ -472,7 +486,9 @@ class MainWindow(QMainWindow):
 
         self.btn_restart = QPushButton("  Käynnistä uudelleen")
         self.btn_restart.setMinimumHeight(32)
-        self.btn_restart.setToolTip("Pysäytä ja käynnistä uudelleen uusilla asetuksilla")
+        self.btn_restart.setToolTip(
+            "Pysäytä ja käynnistä uudelleen uusilla asetuksilla"
+        )
         self.btn_restart.setStyleSheet(
             "QPushButton { background-color: #e65100; color: white; "
             "font-weight: bold; padding: 4px 16px; border-radius: 4px; }"

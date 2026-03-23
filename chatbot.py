@@ -1,5 +1,11 @@
 import os
-import sys
+
+from audio_io import AudioIO
+from config import Config
+from llm import ChatLLM
+from stt import SpeechToText
+from tts_engine import TextToSpeech
+from vad import VoiceActivityDetector
 
 # Add CUDA DLL directory to search path before any CUDA-dependent imports
 _cuda_path = os.environ.get("CUDA_PATH", r"D:\cuda")
@@ -9,13 +15,6 @@ for _p in [_cuda_bin_x64, _cuda_bin]:
     if os.path.isdir(_p):
         os.add_dll_directory(_p)
         os.environ["PATH"] = _p + os.pathsep + os.environ.get("PATH", "")
-
-from config import Config
-from audio_io import AudioIO
-from vad import VoiceActivityDetector
-from stt import SpeechToText
-from llm import ChatLLM
-from tts_engine import TextToSpeech
 
 
 class VoiceChatbot:

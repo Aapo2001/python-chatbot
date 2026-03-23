@@ -67,7 +67,9 @@ def setup_llm(config: Config):
 
     except Exception as e:
         print(f"  ERROR downloading LLM: {e}")
-        print(f"  You can manually download from: https://huggingface.co/{config.llm_repo_id}")
+        print(
+            f"  You can manually download from: https://huggingface.co/{config.llm_repo_id}"
+        )
         print(f"  Place the GGUF file at: {model_path}")
         sys.exit(1)
 

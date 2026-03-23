@@ -1,6 +1,5 @@
 import json
-from dataclasses import dataclass, asdict, fields
-from pathlib import Path
+from dataclasses import asdict, dataclass, fields
 
 CONFIG_FILE = "config.json"
 
