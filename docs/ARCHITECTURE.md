@@ -30,6 +30,15 @@ Terminal runner for the same pipeline.
 
 Unlike the GUI path, it currently uses `Config()` defaults rather than loading `config.json`.
 
+### `voice_chatbot_ros/node.py`
+
+ROS 2 Humble integration node.
+
+- exposes text and status topics over `rclpy`
+- optionally runs the microphone, VAD, and STT loop in a background thread
+- reuses the same `ChatLLM` and `TextToSpeech` wrappers as the desktop and CLI entry points
+- offers a `clear_history` service for resetting the in-memory conversation state
+
 ## Module Responsibilities
 
 ### `config.py`
@@ -132,6 +141,8 @@ There are two distinct kinds of state:
 - in-memory conversation history inside `ChatLLM`
 
 The GUI "clear chat" action affects only the rendered chat panel. It does not clear the in-memory conversation history held by the active `ChatLLM` instance.
+
+The ROS node can clear the same in-memory history through `~/clear_history`.
 
 ## Platform Assumptions
 

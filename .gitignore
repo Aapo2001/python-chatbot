@@ -1,4 +1,8 @@
 /models/*
 /venv/
+/.pixi/
 __pycache__/
 /.claude/
+/build/
+/install/
+/log/

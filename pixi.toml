@@ -1,0 +1,29 @@
+[workspace]
+name = "voice-chatbot"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64"]
+description = "Local voice chatbot with GUI, CLI, and optional ROS 2 integration."
+readme = "README.md"
+requires-pixi = ">=0.40"
+
+[dependencies]
+python = "3.10.*"
+pip = "*"
+cmake = "*"
+git = "*"
+ninja = "*"
+
+[tasks]
+app = "python app.py"
+chatbot = "python chatbot.py"
+setup-models = "python setup_models.py"
+
+[target.win-64.tasks]
+install-python-deps = "cmd /d /c tools\\install_python_windows.bat"
+
+[target.linux-64.tasks]
+install-python-deps = "bash tools/install_python_linux.sh"
+ros-build = "bash tools/ros_build_humble.sh"
+ros-node = "bash tools/ros_run_humble.sh"
+ros-run = "bash tools/ros_run_humble.sh"
+ros-launch = "bash tools/ros_launch_humble.sh"
