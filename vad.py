@@ -7,9 +7,8 @@ from silero_vad import load_silero_vad, VADIterator
 from config import Config
 
 # RMS threshold below which audio is considered silence (int16 scale).
-# Prevents VAD from triggering on low-level electrical noise.
-# Set very low — Silero VAD itself handles speech/noise discrimination well,
-# this only needs to block near-zero electrical noise.
+# Only applied BEFORE speech starts — once speech is active, all chunks
+# are forwarded to Silero so it can detect the end-of-speech silence.
 _ENERGY_FLOOR_RMS = 30
 
 
@@ -44,15 +43,15 @@ class VoiceActivityDetector:
     def process_chunk(
         self, audio_chunk_int16: np.ndarray
     ) -> tuple[str | None, np.ndarray | None]:
-        # Energy gate — skip near-silent frames so electrical noise
-        # doesn't feed into Silero and cause phantom triggers.
-        rms = np.sqrt(np.mean(audio_chunk_int16.astype(np.float64) ** 2))
-        if rms < _ENERGY_FLOOR_RMS:
-            self._pre_buffer.append(audio_chunk_int16.copy())
-            if self._is_speech:
-                # Still accumulate during speech (could be a brief quiet gap)
-                self._audio_buffer.append(audio_chunk_int16.copy())
-            return (None, None)
+        # Energy gate — only applied when NOT in speech.
+        # During speech we MUST forward all chunks (including silence)
+        # to Silero so it can count consecutive silent frames and
+        # trigger "speech_end".  Without this, end detection never fires.
+        if not self._is_speech:
+            rms = np.sqrt(np.mean(audio_chunk_int16.astype(np.float64) ** 2))
+            if rms < _ENERGY_FLOOR_RMS:
+                self._pre_buffer.append(audio_chunk_int16.copy())
+                return (None, None)
 
         audio_float32 = audio_chunk_int16.astype(np.float32) / 32768.0
         chunk_tensor = torch.from_numpy(audio_float32)
@@ -81,7 +80,7 @@ class VoiceActivityDetector:
 
             return ("speech_end", concatenated)
 
-        # Always feed the pre-buffer when not in speech
+        # Feed pre-buffer when not in speech
         if not self._is_speech:
             self._pre_buffer.append(audio_chunk_int16.copy())
 

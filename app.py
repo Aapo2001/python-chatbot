@@ -436,6 +436,7 @@ class MainWindow(QMainWindow):
 
         self._config = Config.load()
         self._worker: ChatbotWorker | None = None
+        self._pending_restart = False
 
         self._build_ui()
         self._connect_signals()
@@ -468,6 +469,17 @@ class MainWindow(QMainWindow):
             "QPushButton:disabled { background-color: #666; }"
         )
         toolbar.addWidget(self.btn_stop)
+
+        self.btn_restart = QPushButton("  Käynnistä uudelleen")
+        self.btn_restart.setMinimumHeight(32)
+        self.btn_restart.setToolTip("Pysäytä ja käynnistä uudelleen uusilla asetuksilla")
+        self.btn_restart.setStyleSheet(
+            "QPushButton { background-color: #e65100; color: white; "
+            "font-weight: bold; padding: 4px 16px; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #ef6c00; }"
+            "QPushButton:disabled { background-color: #666; }"
+        )
+        toolbar.addWidget(self.btn_restart)
 
         self.btn_clear = QPushButton("  Tyhjennä keskustelu")
         self.btn_clear.setMinimumHeight(32)
@@ -548,6 +560,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.btn_start.clicked.connect(self._on_start)
         self.btn_stop.clicked.connect(self._on_stop)
+        self.btn_restart.clicked.connect(self._on_restart)
         self.btn_clear.clicked.connect(self._on_clear)
 
     # ── State helpers ──
@@ -555,15 +568,28 @@ class MainWindow(QMainWindow):
     def _set_running_state(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
-        self.settings_panel.setEnabled(not running)
+        self.btn_restart.setEnabled(running)
+        # Settings always editable — use Restart to apply while running
+        self.settings_panel.setEnabled(True)
+
+    def _build_config_from_ui(self) -> Config:
+        """Build a fresh Config from current UI widget values."""
+        cfg = Config()
+        self.settings_panel.write_to_config(cfg)
+        cfg.save()
+        return cfg
 
     # ── Slots ──
 
     def _on_start(self) -> None:
-        # Sync settings → config and save
-        self._config = Config.load()  # start fresh
-        self.settings_panel.write_to_config(self._config)
-        self._config.save()
+        # Ensure any previous worker is fully stopped
+        if self._worker is not None:
+            self._worker.stop()
+            self._worker.wait(5000)
+            self._worker = None
+
+        # Build config directly from current UI values (not from config.json)
+        self._config = self._build_config_from_ui()
 
         # Validate LLM path
         if not Path(self._config.llm_model_path).exists():
@@ -600,13 +626,30 @@ class MainWindow(QMainWindow):
             self._append_log("Pysäytetään...")
             self._worker.stop()
             self.btn_stop.setEnabled(False)
+            self.btn_restart.setEnabled(False)
+
+    def _on_restart(self) -> None:
+        """Stop current worker and start a new one with current UI settings."""
+        self._append_log("Käynnistetään uudelleen uusilla asetuksilla...")
+        self._pending_restart = True
+        if self._worker is not None:
+            self._worker.stop()
+        else:
+            self._on_start()
 
     def _on_clear(self) -> None:
         self.chat_display.clear()
 
     def _on_worker_finished(self) -> None:
-        self._set_running_state(False)
         self._worker = None
+
+        # If a restart was requested, start again immediately
+        if getattr(self, "_pending_restart", False):
+            self._pending_restart = False
+            self._on_start()
+            return
+
+        self._set_running_state(False)
         self._update_status("Pysäytetty")
         self._append_log("Chatbot pysäytetty.")
 

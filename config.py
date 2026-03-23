@@ -14,8 +14,8 @@ class Config:
 
     # VAD settings
     vad_threshold: float = 0.45
-    min_silence_duration_ms: int = 900
-    speech_pad_ms: int = 250
+    min_silence_duration_ms: int = 550
+    speech_pad_ms: int = 200
     min_speech_duration_ms: int = 400
     vad_pre_buffer_ms: int = 500  # audio kept before VAD triggers
 
