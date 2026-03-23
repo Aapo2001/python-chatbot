@@ -13,10 +13,11 @@ class Config:
     chunk_samples: int = 512  # 32ms at 16kHz
 
     # VAD settings
-    vad_threshold: float = 0.5
-    min_silence_duration_ms: int = 700
-    speech_pad_ms: int = 30
-    min_speech_duration_ms: int = 250
+    vad_threshold: float = 0.45
+    min_silence_duration_ms: int = 900
+    speech_pad_ms: int = 250
+    min_speech_duration_ms: int = 400
+    vad_pre_buffer_ms: int = 500  # audio kept before VAD triggers
 
     # Language setting (used across STT, LLM, and TTS)
     language: str = "fi"  # Finnish

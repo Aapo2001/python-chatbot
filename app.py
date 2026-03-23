@@ -340,6 +340,16 @@ class SettingsPanel(QScrollArea):
         self.spin_min_speech.setSuffix(" ms")
         form_vad.addRow("Puhe (min):", self.spin_min_speech)
 
+        self.spin_pre_buffer = QSpinBox()
+        self.spin_pre_buffer.setRange(100, 2000)
+        self.spin_pre_buffer.setSingleStep(50)
+        self.spin_pre_buffer.setSuffix(" ms")
+        self.spin_pre_buffer.setToolTip(
+            "Ääntä tallennetaan ennen puheen tunnistusta, "
+            "jotta ensimmäiset tavut eivät leikkaudu pois."
+        )
+        form_vad.addRow("Esipuskuri:", self.spin_pre_buffer)
+
         layout.addWidget(grp_vad)
 
         # ── TTS extra ──
@@ -376,6 +386,7 @@ class SettingsPanel(QScrollArea):
         self.spin_silence_ms.setValue(cfg.min_silence_duration_ms)
         self.spin_speech_pad.setValue(cfg.speech_pad_ms)
         self.spin_min_speech.setValue(cfg.min_speech_duration_ms)
+        self.spin_pre_buffer.setValue(cfg.vad_pre_buffer_ms)
 
         self.chk_tts_gpu.setChecked(cfg.tts_gpu)
 
@@ -396,6 +407,7 @@ class SettingsPanel(QScrollArea):
         cfg.min_silence_duration_ms = self.spin_silence_ms.value()
         cfg.speech_pad_ms = self.spin_speech_pad.value()
         cfg.min_speech_duration_ms = self.spin_min_speech.value()
+        cfg.vad_pre_buffer_ms = self.spin_pre_buffer.value()
 
         cfg.tts_gpu = self.chk_tts_gpu.isChecked()
         return cfg
