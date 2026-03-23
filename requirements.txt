@@ -4,3 +4,4 @@ silero-vad
 sounddevice
 numpy
 huggingface-hub
+PySide6

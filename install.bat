@@ -76,6 +76,8 @@ echo.
 echo Next steps:
 echo   1. Activate the venv:  venv\Scripts\activate.bat
 echo   2. Download models:    python setup_models.py
-echo   3. Start chatbot:      python chatbot.py
+echo   3. Start chatbot:
+echo        GUI mode:      python app.py
+echo        Terminal mode:  python chatbot.py
 echo.
 pause

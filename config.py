@@ -1,5 +1,8 @@
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
+
+CONFIG_FILE = "config.json"
 
 
 @dataclass
@@ -19,21 +22,24 @@ class Config:
     language: str = "fi"  # Finnish
 
     # Whisper settings
-    whisper_model: str = "base"  # multilingual model (no .en suffix)
+    whisper_model: str = "small"  # multilingual model – 'small' much better for Finnish
     whisper_n_threads: int = 4
 
     # LLM settings
     models_dir: str = "models"
-    llm_model_path: str = "models/mistral-7b-instruct-v0.3.Q4_K_M.gguf"
+    llm_model_path: str = "models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
     llm_n_gpu_layers: int = -1  # -1 = offload all layers to GPU
     llm_n_ctx: int = 2048
     llm_max_tokens: int = 256
     llm_temperature: float = 0.7
     llm_system_prompt: str = (
-        "Olet avulias suomenkielinen ääniassistentti. Vastaa aina suomeksi. "
-        "Pidä vastauksesi lyhyinä ja keskustelunomaisina, sopivina puhuttavaksi "
-        "ääneen. Rajoita vastauksesi 2-3 lauseeseen, ellei tarkempaa vastausta "
-        "erikseen pyydetä."
+        "You are a Finnish-speaking voice assistant. You MUST ALWAYS respond "
+        "in Finnish (suomi). NEVER respond in English or any other language. "
+        "Keep your responses concise and conversational (2-3 sentences), "
+        "suitable for spoken dialogue. If the user's input is unclear, ask "
+        "them to repeat in Finnish. "
+        "Olet suomenkielinen ääniassistentti. Vastaa aina suomeksi, lyhyesti "
+        "ja selkeästi."
     )
     max_conversation_turns: int = 20
 
@@ -42,5 +48,20 @@ class Config:
     tts_gpu: bool = True
 
     # HuggingFace model repo for LLM download
-    llm_repo_id: str = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
-    llm_filename: str = "mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+    llm_repo_id: str = "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"
+    llm_filename: str = "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+
+    def save(self, path: str = CONFIG_FILE) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(asdict(self), f, indent=2, ensure_ascii=False)
+
+    @classmethod
+    def load(cls, path: str = CONFIG_FILE) -> "Config":
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            valid_fields = {field.name for field in fields(cls)}
+            filtered = {k: v for k, v in data.items() if k in valid_fields}
+            return cls(**filtered)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return cls()
