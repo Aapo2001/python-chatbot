@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvidia-smi --query-gpu=driver_version,cuda_version --format=csv,noheader)",
+      "Bash(nvidia-smi)",
+      "Bash(pip index:*)",
+      "Bash(venvScriptspython -c \"import transformers; print\\(transformers.__version__\\)\")",
+      "Bash(cd /d D:Claude_python)",
+      "Bash(venvScriptspython.exe -c \"import transformers; print\\(transformers.__version__\\)\")",
+      "Bash(D:/Claude_python/venv/Scripts/python.exe -c \"import transformers; print\\(transformers.__version__\\)\")",
+      "Bash(D:/Claude_python/venv/Scripts/pip.exe show:*)",
+      "Bash(D:/Claude_python/venv/Scripts/pip.exe list:*)",
+      "Bash(D:/Claude_python/venv/Scripts/python.exe -c \"from transformers.pytorch_utils import isin_mps_friendly\")",
+      "Bash(D:/Claude_python/venv/Scripts/python.exe -c \":*)",
+      "Bash(D:/Claude_python/venv/Scripts/pip.exe index:*)",
+      "Bash(D:/Claude_python/venv/Scripts/pip.exe install:*)",
+      "Bash(D:/Claude_python/venv/Scripts/python.exe -c \"from transformers.pytorch_utils import isin_mps_friendly; print\\(''OK - isin_mps_friendly found''\\)\")",
+      "Bash(D:/Claude_python/venv/Scripts/python.exe -c \"from TTS.api import TTS; print\\(''Coqui TTS import OK''\\)\")",
+      "Bash(where cudart64_*)",
+      "Read(//d/cuda/bin/**)",
+      "Bash(echo \"$PATH\")",
+      "Bash(tr ';' '\\\\n')",
+      "Bash(ls D:/cuda/bin/x64/*.dll)"
+    ]
+  }
+}
