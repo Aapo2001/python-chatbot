@@ -42,7 +42,7 @@ def _parse_version(raw: str) -> tuple[int, int]:
             break
     while len(parts) < 2:
         parts.append(0)
-    return tuple(parts)
+    return parts[0], parts[1]
 
 
 def _is_compatible(raw: str) -> bool:

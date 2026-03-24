@@ -126,7 +126,7 @@ class VoiceChatbotNode(VoiceNodeBase):
                 event, audio_data = self._vad.process_chunk(chunk)
                 if event == "speech_start":
                     self._publish_status("speech_detected")
-                elif event == "speech_end":
+                elif event == "speech_end" and audio_data is not None:
                     self._publish_status("transcribing")
                     text = self._stt.transcribe(audio_data)
                     if not text or text.isspace():

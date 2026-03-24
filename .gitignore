@@ -29,3 +29,5 @@ __pycache__/
 
 # Debug / temp output
 qt_debug.txt
+
+/.tmp_basedpyright/

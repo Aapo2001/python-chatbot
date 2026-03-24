@@ -13,7 +13,16 @@ Usage::
     llm.clear_history()
 """
 
+from typing import cast
+
 from llama_cpp import Llama
+from llama_cpp.llama_types import (
+    ChatCompletionRequestAssistantMessage,
+    ChatCompletionRequestMessage,
+    ChatCompletionRequestSystemMessage,
+    ChatCompletionRequestUserMessage,
+    CreateChatCompletionResponse,
+)
 
 from .config import Config
 
@@ -44,7 +53,7 @@ class ChatLLM:
         self._max_turns = config.max_conversation_turns
         self._max_tokens = config.llm_max_tokens
         self._temperature = config.llm_temperature
-        self._conversation_history: list[dict[str, str]] = []
+        self._conversation_history: list[ChatCompletionRequestMessage] = []
         print("[LLM] Model loaded.")
 
     def chat(self, user_message: str) -> str:
@@ -61,7 +70,11 @@ class ChatLLM:
             The assistant's reply text, or ``""`` if the model produced
             no output.
         """
-        self._conversation_history.append({"role": "user", "content": user_message})
+        user_entry: ChatCompletionRequestUserMessage = {
+            "role": "user",
+            "content": user_message,
+        }
+        self._conversation_history.append(user_entry)
 
         # Each "turn" is one user + one assistant message (2 entries).
         # Trim from the front to keep the most recent context.
@@ -70,25 +83,34 @@ class ChatLLM:
             self._conversation_history = self._conversation_history[-max_messages:]
 
         # Prepend the system prompt (not part of trimmed history).
-        messages = [
-            {"role": "system", "content": self._system_prompt},
+        system_entry: ChatCompletionRequestSystemMessage = {
+            "role": "system",
+            "content": self._system_prompt,
+        }
+        messages: list[ChatCompletionRequestMessage] = [
+            system_entry,
             *self._conversation_history,
         ]
 
-        response = self._llm.create_chat_completion(
-            messages=messages,
-            max_tokens=self._max_tokens,
-            temperature=self._temperature,
+        response = cast(
+            CreateChatCompletionResponse,
+            self._llm.create_chat_completion(
+                messages=messages,
+                max_tokens=self._max_tokens,
+                temperature=self._temperature,
+                stream=False,
+            ),
         )
 
-        assistant_text = response["choices"][0]["message"]["content"]
+        assistant_text = response["choices"][0]["message"].get("content") or ""
         if assistant_text:
-            self._conversation_history.append(
-                {"role": "assistant", "content": assistant_text}
-            )
+            assistant_entry: ChatCompletionRequestAssistantMessage = {
+                "role": "assistant",
+                "content": assistant_text,
+            }
+            self._conversation_history.append(assistant_entry)
             return assistant_text
-        else:
-            return ""
+        return ""
 
     def clear_history(self):
         """Erase all stored conversation turns."""
