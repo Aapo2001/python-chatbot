@@ -1,78 +1,29 @@
 """
-ROS 2 STT node – microphone capture, voice activity detection, and
-speech-to-text transcription.
+ROS 2 STT node – microphone capture, VAD, and speech-to-text.
 
-This is one of three split nodes in the ROS 2 architecture.  It owns
-the microphone stream and publishes transcribed user text to the LLM
-node.  The data flow is::
-
-    Microphone → AudioIO → VAD → Whisper STT
-                                      │
-                    ┌─────────────────┘
-                    ▼
-          /voice_chatbot/user_text  ──→  LLM node
-          /voice_chatbot/transcript ──→  GUI / logging
-
-The node also subscribes to ``tts_done`` from the TTS node so it can
-clear the microphone buffer and reset VAD after the assistant finishes
-speaking (prevents self-triggering).
+Publishes transcribed user text to the LLM node.  Subscribes to
+``tts_done`` to clear the mic buffer and reset VAD after playback.
 """
 
-import os
 import threading
 import traceback
 
 import rclpy
-from rclpy.node import Node
 from std_msgs.msg import String
 
-# ── CUDA DLL setup ────────────────────────────────────────────────
-_cuda_path = os.environ.get("CUDA_PATH", r"D:\cuda")
-for _p in [os.path.join(_cuda_path, "bin", "x64"), os.path.join(_cuda_path, "bin")]:
-    if hasattr(os, "add_dll_directory") and os.path.isdir(_p):
-        os.add_dll_directory(_p)
-        os.environ["PATH"] = _p + os.pathsep + os.environ.get("PATH", "")
-
-from audio_io import AudioIO
-from config import Config
-from stt import SpeechToText
-from vad import VoiceActivityDetector
+from voice_chatbot.audio_io import AudioIO
+from voice_chatbot.stt import SpeechToText
+from voice_chatbot.vad import VoiceActivityDetector
+from voice_chatbot_ros._base import VoiceNodeBase
 
 
-class VoiceSttNode(Node):
-    """ROS 2 node for real-time speech-to-text.
-
-    Publishers:
-        - ``user_text`` – transcribed text (consumed by the LLM node).
-        - ``transcript`` – same text (consumed by the GUI for display).
-        - ``status`` – pipeline state (``listening``, ``speech_detected``,
-          ``transcribing``, ``error``).
-        - ``log`` – human-readable log messages.
-
-    Subscribers:
-        - ``tts_done`` – signal from the TTS node that playback has
-          finished, triggering a buffer clear + VAD reset.
-
-    Parameters:
-        - ``config_path`` (str) – path to ``config.json``.
-        - ``load_config_file`` (bool) – whether to load the file or use
-          defaults.
-    """
-
+class VoiceSttNode(VoiceNodeBase):
     def __init__(self) -> None:
         super().__init__("voice_stt")
-
-        self.declare_parameter("config_path", "config.json")
-        self.declare_parameter("load_config_file", True)
-
-        self._config = self._load_config()
+        self._init_base()
 
         self._user_text_pub = self.create_publisher(String, "user_text", 10)
         self._transcript_pub = self.create_publisher(String, "transcript", 10)
-        self._status_pub = self.create_publisher(String, "status", 10)
-        self._log_pub = self.create_publisher(String, "log", 50)
-
-        # Subscribe to TTS done signal to clear audio buffer and reset VAD
         self._tts_done_sub = self.create_subscription(
             String, "tts_done", self._on_tts_done, 10
         )
@@ -86,16 +37,6 @@ class VoiceSttNode(Node):
         self._stt: SpeechToText | None = None
 
         self._initialize()
-
-    def _load_config(self) -> Config:
-        config_path = str(self.get_parameter("config_path").value)
-        load_config_file = bool(self.get_parameter("load_config_file").value)
-        if load_config_file:
-            cfg = Config.load(config_path)
-            self.get_logger().info(f"Loaded config from '{config_path}'.")
-            return cfg
-        self.get_logger().info("Using in-code Config defaults.")
-        return Config()
 
     def _initialize(self) -> None:
         try:
@@ -124,7 +65,6 @@ class VoiceSttNode(Node):
             raise
 
     def _on_tts_done(self, msg: String) -> None:
-        """Clear audio buffer and reset VAD after TTS playback finishes."""
         del msg
         if self._audio is not None:
             self._audio.clear_queue()
@@ -133,9 +73,7 @@ class VoiceSttNode(Node):
         self._publish_status("listening")
 
     def _voice_loop(self) -> None:
-        assert self._audio is not None
-        assert self._stt is not None
-        assert self._vad is not None
+        assert self._audio and self._stt and self._vad
 
         while self._running.is_set():
             try:
@@ -152,7 +90,6 @@ class VoiceSttNode(Node):
                     if not text or text.isspace():
                         self._publish_status("listening")
                         continue
-
                     self._transcript_pub.publish(String(data=text))
                     self._user_text_pub.publish(String(data=text))
                     self._publish_log(f"Transcript: {text}")
@@ -161,15 +98,7 @@ class VoiceSttNode(Node):
                 self._publish_log("STT voice loop failed.")
                 self.get_logger().error(traceback.format_exc())
 
-    def _publish_status(self, status: str) -> None:
-        self._status_pub.publish(String(data=status))
-        self.get_logger().info(f"status={status}")
-
-    def _publish_log(self, message: str) -> None:
-        self._log_pub.publish(String(data=message))
-        self.get_logger().info(message)
-
-    def destroy_node(self) -> bool:
+    def destroy_node(self) -> None:
         self._running.clear()
         if self._audio is not None:
             self._audio.close()
@@ -179,8 +108,8 @@ class VoiceSttNode(Node):
 
 
 def main(args=None) -> None:
-    node: VoiceSttNode | None = None
     rclpy.init(args=args)
+    node = None
     try:
         node = VoiceSttNode()
         rclpy.spin(node)

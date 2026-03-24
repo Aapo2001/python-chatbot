@@ -5,16 +5,20 @@ Used by ``colcon build`` (via ``ament_python``) to install the ROS 2
 nodes and their supporting Python modules into the local workspace
 overlay.
 
-Entry points register four console-script executables:
+Entry points register application and ROS console scripts:
 
+- ``voice_chatbot_app`` – standalone desktop GUI
+- ``voice_chatbot_cli`` – terminal runner
+- ``voice_chatbot_ros_app`` – ROS-connected desktop GUI
+- ``voice_chatbot_setup_models`` – model bootstrap helper
 - ``voice_chatbot_node`` – legacy monolithic node
 - ``voice_stt_node`` – STT split node
 - ``voice_llm_node`` – LLM split node
 - ``voice_tts_node`` – TTS split node
 
-The ``py_modules`` list ensures that the shared library modules
-(``audio_io``, ``config``, ``llm``, etc.) are also installed into the
-overlay so the node scripts can import them.
+The shared application code now lives in the ``voice_chatbot`` package,
+which is installed alongside the ROS package so the nodes can import it
+without relying on repo-root modules.
 """
 
 from glob import glob
@@ -27,15 +31,14 @@ package_name = "voice_chatbot_ros"
 setup(
     name=package_name,
     version="0.1.0",
-    packages=find_packages(include=[package_name, f"{package_name}.*"]),
-    py_modules=[
-        "audio_io",
-        "config",
-        "llm",
-        "stt",
-        "tts_engine",
-        "vad",
-    ],
+    packages=find_packages(
+        include=[
+            "voice_chatbot",
+            "voice_chatbot.*",
+            package_name,
+            f"{package_name}.*",
+        ]
+    ),
     data_files=[
         (
             "share/ament_index/resource_index/packages",
@@ -52,6 +55,10 @@ setup(
     license="Proprietary",
     entry_points={
         "console_scripts": [
+            "voice_chatbot_app = voice_chatbot.app:main",
+            "voice_chatbot_cli = voice_chatbot.chatbot:main",
+            "voice_chatbot_ros_app = voice_chatbot.ros_app:main",
+            "voice_chatbot_setup_models = voice_chatbot.setup_models:main",
             "voice_chatbot_node = voice_chatbot_ros.node:main",
             "voice_stt_node = voice_chatbot_ros.stt_node:main",
             "voice_llm_node = voice_chatbot_ros.llm_node:main",

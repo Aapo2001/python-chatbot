@@ -4,6 +4,9 @@
 
 The `voice_chatbot_ros` package provides ROS 2 integration for the local voice chatbot pipeline. It offers two architectures:
 
+The shared non-ROS runtime code is imported from the sibling `voice_chatbot`
+package, which keeps the audio, config, model, and GUI code out of the repo root.
+
 ### Split-node architecture (recommended)
 
 Three independent nodes, each loading only the models they need. Because they start in separate processes, models load **in parallel** and the system is ready much faster than the monolithic node.

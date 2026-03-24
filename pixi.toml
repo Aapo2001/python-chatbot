@@ -18,10 +18,10 @@ ros-humble-desktop = "*"
 
 [tasks]
 ensure-setuptools-compat = "python tools/ensure_setuptools_compat.py"
-app = "python app.py"
-ros-app = "python ros_app.py"
-chatbot = "python chatbot.py"
-setup-models = "python setup_models.py"
+app = "python -m voice_chatbot.app"
+ros-app = "python -m voice_chatbot.ros_app"
+chatbot = "python -m voice_chatbot.chatbot"
+setup-models = "python -m voice_chatbot.setup_models"
 build = { cmd = "colcon build --symlink-install --packages-select voice_chatbot_ros", depends-on = ["ensure-setuptools-compat"] }
 
 [target.win-64.tasks]

@@ -10,7 +10,7 @@ Primary pipeline:
 
 ## Entry Points
 
-### `app.py`
+### `voice_chatbot/app.py`
 
 Desktop UI built with PySide6.
 
@@ -20,15 +20,14 @@ Desktop UI built with PySide6.
 
 This is the main operational interface for the project.
 
-### `chatbot.py`
+### `voice_chatbot/chatbot.py`
 
 Terminal runner for the same pipeline.
 
 - initializes all model wrappers in process
 - prints status and chat messages to the console
 - loops until interrupted with `Ctrl+C`
-
-Unlike the GUI path, it currently uses `Config()` defaults rather than loading `config.json`.
+- loads persisted settings through `Config.load()`
 
 ### `voice_chatbot_ros/node.py`
 
@@ -41,7 +40,7 @@ ROS 2 Humble integration node.
 
 ## Module Responsibilities
 
-### `config.py`
+### `voice_chatbot/config.py`
 
 Defines the `Config` dataclass and JSON serialization helpers.
 
@@ -51,7 +50,7 @@ Defines the `Config` dataclass and JSON serialization helpers.
 
 The `load()` implementation ignores unknown JSON keys, which makes config evolution tolerant to stale fields.
 
-### `audio_io.py`
+### `voice_chatbot/audio_io.py`
 
 Owns microphone capture and audio playback through `sounddevice`.
 
@@ -63,7 +62,7 @@ Owns microphone capture and audio playback through `sounddevice`.
 
 The module uses the default input and output devices only.
 
-### `vad.py`
+### `voice_chatbot/vad.py`
 
 Wraps Silero VAD and adds practical buffering logic.
 
@@ -76,15 +75,15 @@ Key behaviors:
 
 This module is where turn segmentation quality is determined.
 
-### `stt.py`
+### `voice_chatbot/stt.py`
 
-Loads Whisper through `pywhispercpp.model.Model`.
+Loads Whisper through `faster_whisper.WhisperModel`.
 
 - converts `int16` PCM to normalized `float32`
 - transcribes with the configured language
 - joins returned segments into a single string
 
-### `llm.py`
+### `voice_chatbot/llm.py`
 
 Wraps `llama_cpp.Llama` for chat completion.
 
@@ -95,14 +94,14 @@ Wraps `llama_cpp.Llama` for chat completion.
 
 `clear_history()` exists but is not called from the GUI controls.
 
-### `tts_engine.py`
+### `voice_chatbot/tts_engine.py`
 
 Loads Coqui TTS and synthesizes speech to a NumPy array.
 
 - initializes `TTS(model_name=..., gpu=...)`
 - exposes `synthesize(text)` returning `(audio, sample_rate)`
 
-### `setup_models.py`
+### `voice_chatbot/setup_models.py`
 
 Pre-flight model setup script.
 
@@ -110,7 +109,7 @@ Pre-flight model setup script.
 - triggers model downloads and cache initialization
 - downloads the configured GGUF file from Hugging Face if missing
 
-This script uses config defaults rather than reading `config.json`.
+This script loads `config.json` through `Config.load()`.
 
 ## GUI Runtime Sequence
 

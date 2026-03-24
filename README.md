@@ -2,10 +2,15 @@
 
 Local voice chatbot for Windows with a Finnish-first default configuration. The application captures microphone audio, detects speech with Silero VAD, transcribes it with Whisper, generates a reply with a local GGUF LLM, and speaks the reply with Coqui TTS.
 
-The repository contains two entry points:
+The repository's application code now lives under the `voice_chatbot/`
+package. The repo root keeps thin compatibility wrappers (`app.py`,
+`chatbot.py`, `ros_app.py`, `setup_models.py`) so older commands still work.
 
-- `app.py`: PySide6 desktop UI for configuring and running the chatbot.
-- `chatbot.py`: terminal-only runner with the same audio pipeline.
+Primary entry points:
+
+- `python -m voice_chatbot.app`: PySide6 desktop UI for configuring and running the chatbot.
+- `python -m voice_chatbot.chatbot`: terminal-only runner with the same audio pipeline.
+- `python -m voice_chatbot.ros_app`: ROS-connected PySide6 GUI.
 - `voice_chatbot_ros/node.py`: ROS 2 Humble node that exposes the pipeline through ROS topics and a service.
 
 ## What The Code Does
@@ -25,15 +30,8 @@ The GUI wraps this pipeline in a background `QThread` and exposes model and runt
 
 | Path | Purpose |
 | --- | --- |
-| `app.py` | Main desktop application and worker thread orchestration |
-| `chatbot.py` | Console entry point |
-| `config.py` | `Config` dataclass and JSON load/save helpers |
-| `audio_io.py` | Microphone capture, playback, and queue handling |
-| `vad.py` | Silero VAD integration plus pre-buffer logic |
-| `stt.py` | Whisper STT wrapper |
-| `llm.py` | `llama-cpp-python` chat wrapper and history management |
-| `tts_engine.py` | Coqui TTS wrapper |
-| `setup_models.py` | One-time model download and validation script |
+| `voice_chatbot/` | Main Python application package for GUI, CLI, config, audio, VAD, STT, LLM, and TTS code |
+| `app.py`, `chatbot.py`, `ros_app.py`, `setup_models.py` | Thin compatibility entry points that call into `voice_chatbot/` |
 | `install.bat` | Windows setup script for Python packages and CUDA builds |
 | `pixi.toml` | Pixi workspace manifest for the base toolchain and common tasks |
 | `pixi.lock` | Resolved Pixi lockfile for the base environment |
@@ -141,12 +139,14 @@ Desktop UI:
 
 ```powershell
 pixi run app
+# equivalent: python -m voice_chatbot.app
 ```
 
 Terminal mode:
 
 ```powershell
 pixi run chatbot
+# equivalent: python -m voice_chatbot.chatbot
 ```
 
 ROS 2 Humble node:
@@ -173,8 +173,7 @@ Important settings:
 ### Configuration behavior to know
 
 - The GUI loads from `config.json` through `Config.load()` and writes the current sidebar values back to disk when you start the worker.
-- `chatbot.py` currently constructs `Config()` directly, so it uses dataclass defaults instead of loading `config.json`.
-- `setup_models.py` also uses `Config()` directly, so it validates or downloads models based on default values unless the script is changed.
+- The CLI and model setup script also load `config.json` by default, so they now use the same persisted settings as the GUI unless you edit the package code.
 
 ## GUI Behavior
 
