@@ -6,14 +6,6 @@ if not defined CONFIG_PATH (
     set "CONFIG_PATH=%CD%\config.json"
 )
 
-if not defined VOICE_LOOP (
-    set "VOICE_LOOP=false"
-)
-
-if not defined TTS_PLAYBACK (
-    set "TTS_PLAYBACK=true"
-)
-
 if not exist "install\setup.bat" (
     echo ERROR: install\setup.bat not found. Run `pixi run build` first.
     exit /b 1
@@ -26,6 +18,4 @@ if errorlevel 1 (
 )
 
 ros2 launch voice_chatbot_ros voice_chatbot.launch.py ^
-    config_path:="%CONFIG_PATH%" ^
-    enable_voice_loop:=%VOICE_LOOP% ^
-    enable_tts_playback:=%TTS_PLAYBACK%
+    config_path:="%CONFIG_PATH%"

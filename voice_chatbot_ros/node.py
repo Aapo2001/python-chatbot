@@ -1,4 +1,20 @@
-"""ROS 2 Humble node for the local voice chatbot pipeline."""
+"""
+ROS 2 monolithic node (legacy) – runs the full voice chatbot pipeline
+in a single process.
+
+.. deprecated::
+    Prefer the split-node architecture (``stt_node``, ``llm_node``,
+    ``tts_node``) which loads models in parallel across three processes
+    and starts up significantly faster.
+
+This node combines STT, LLM, and TTS in one process.  It supports two
+operating modes controlled by ROS parameters:
+
+- **Text mode** (default): subscribe to ``~/user_text``, generate a
+  reply, optionally speak it.
+- **Voice mode** (``enable_voice_loop=true``): additionally run
+  microphone → VAD → Whisper in a background thread.
+"""
 
 import os
 import queue
@@ -26,6 +42,12 @@ from vad import VoiceActivityDetector
 
 
 class VoiceChatbotNode(Node):
+    """Legacy monolithic chatbot node.
+
+    Loads all models sequentially in a single process.  Use
+    ``pixi run ros-start`` (split nodes) for faster startup.
+    """
+
     def __init__(self) -> None:
         super().__init__("voice_chatbot")
 

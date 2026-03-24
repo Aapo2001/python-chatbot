@@ -13,23 +13,33 @@ cmake = "*"
 git = "*"
 ninja = "*"
 colcon-common-extensions = "*"
-setuptools = "<=58.2.0"
+setuptools = ">=69.5,<80"
 ros-humble-desktop = "*"
 
 [tasks]
+ensure-setuptools-compat = "python tools/ensure_setuptools_compat.py"
 app = "python app.py"
+ros-app = "python ros_app.py"
 chatbot = "python chatbot.py"
 setup-models = "python setup_models.py"
-build = "colcon build --symlink-install --packages-select voice_chatbot_ros"
+build = { cmd = "colcon build --symlink-install --packages-select voice_chatbot_ros", depends-on = ["ensure-setuptools-compat"] }
 
 [target.win-64.tasks]
 install-python-deps = "cmd /d /c tools\\install_python_windows.bat"
 ros-node = { cmd = "cmd /d /c tools\\ros_run_pixi.bat", depends-on = ["build"] }
 ros-run = { cmd = "cmd /d /c tools\\ros_run_pixi.bat", depends-on = ["build"] }
-ros-launch = { cmd = "cmd /d /c tools\\ros_launch_pixi.bat", depends-on = ["build"], env = { VOICE_LOOP = "false", TTS_PLAYBACK = "true" } }
+ros-launch = { cmd = "cmd /d /c tools\\ros_launch_pixi.bat", depends-on = ["build"] }
+ros-start = "cmd /d /c tools\\ros_start_all.bat"
+ros-stt = "cmd /d /c tools\\ros_run_node_pixi.bat voice_stt_node"
+ros-llm = "cmd /d /c tools\\ros_run_node_pixi.bat voice_llm_node"
+ros-tts = "cmd /d /c tools\\ros_run_node_pixi.bat voice_tts_node"
 
 [target.linux-64.tasks]
 install-python-deps = "bash tools/install_python_linux.sh"
 ros-node = { cmd = "bash tools/ros_run_pixi.sh", depends-on = ["build"] }
 ros-run = { cmd = "bash tools/ros_run_pixi.sh", depends-on = ["build"] }
-ros-launch = { cmd = "bash tools/ros_launch_pixi.sh", depends-on = ["build"], env = { VOICE_LOOP = "false", TTS_PLAYBACK = "true" } }
+ros-launch = { cmd = "bash tools/ros_launch_pixi.sh", depends-on = ["build"] }
+ros-start = "bash tools/ros_start_all.sh"
+ros-stt = "bash tools/ros_run_node_pixi.sh voice_stt_node"
+ros-llm = "bash tools/ros_run_node_pixi.sh voice_llm_node"
+ros-tts = "bash tools/ros_run_node_pixi.sh voice_tts_node"

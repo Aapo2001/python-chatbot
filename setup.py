@@ -1,3 +1,22 @@
+"""
+``setup.py`` for the ``voice_chatbot_ros`` ROS 2 package.
+
+Used by ``colcon build`` (via ``ament_python``) to install the ROS 2
+nodes and their supporting Python modules into the local workspace
+overlay.
+
+Entry points register four console-script executables:
+
+- ``voice_chatbot_node`` – legacy monolithic node
+- ``voice_stt_node`` – STT split node
+- ``voice_llm_node`` – LLM split node
+- ``voice_tts_node`` – TTS split node
+
+The ``py_modules`` list ensures that the shared library modules
+(``audio_io``, ``config``, ``llm``, etc.) are also installed into the
+overlay so the node scripts can import them.
+"""
+
 from glob import glob
 
 from setuptools import find_packages, setup
@@ -31,10 +50,12 @@ setup(
     maintainer_email="noreply@example.com",
     description="ROS 2 Humble integration for the local voice chatbot pipeline.",
     license="Proprietary",
-    tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "voice_chatbot_node = voice_chatbot_ros.node:main",
+            "voice_stt_node = voice_chatbot_ros.stt_node:main",
+            "voice_llm_node = voice_chatbot_ros.llm_node:main",
+            "voice_tts_node = voice_chatbot_ros.tts_node:main",
         ],
     },
 )

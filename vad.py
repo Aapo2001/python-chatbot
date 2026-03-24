@@ -1,3 +1,29 @@
+"""
+Voice Activity Detection (VAD) using Silero-VAD.
+
+Wraps `silero-vad <https://github.com/snakers4/silero-vad>`_ with
+two practical additions that improve accuracy in a real-time voice
+assistant pipeline:
+
+1. **Energy gate** – a simple RMS check rejects obviously-silent chunks
+   *before* they reach Silero, reducing false positives from background
+   hum.  The gate is only active while no speech is in progress; once
+   speech has started, every chunk is forwarded so Silero can count
+   silence frames and fire ``speech_end``.
+
+2. **Pre-buffer** – a rolling buffer of recent chunks is maintained so
+   that audio captured *before* Silero reports ``speech_start`` is
+   prepended to the utterance.  Without this the first syllable is
+   always clipped, producing garbled Whisper output.
+
+Usage::
+
+    vad = VoiceActivityDetector(config)
+    event, audio_data = vad.process_chunk(chunk_int16)
+    # event is "speech_start", "speech_end", or None
+    # audio_data is the complete utterance (int16) on "speech_end"
+"""
+
 from collections import deque
 
 import numpy as np
@@ -13,6 +39,13 @@ _ENERGY_FLOOR_RMS = 30
 
 
 class VoiceActivityDetector:
+    """Silero-VAD wrapper with energy gating and pre-buffering.
+
+    Args:
+        config: Shared :class:`Config` – reads VAD thresholds, sample
+                rate, chunk size, and pre-buffer duration.
+    """
+
     def __init__(self, config: Config):
         model = load_silero_vad()
         self._vad_iterator = VADIterator(
@@ -43,6 +76,22 @@ class VoiceActivityDetector:
     def process_chunk(
         self, audio_chunk_int16: np.ndarray
     ) -> tuple[str | None, np.ndarray | None]:
+        """Feed one audio chunk and return a VAD event.
+
+        Args:
+            audio_chunk_int16: A 1-D int16 numpy array (one chunk from
+                :meth:`AudioIO.get_audio_chunk`).
+
+        Returns:
+            A ``(event, audio_data)`` tuple where *event* is one of:
+
+            - ``"speech_start"`` – speech onset detected (audio_data is
+              ``None``).
+            - ``"speech_end"`` – end of utterance (audio_data is the
+              concatenated int16 array of the full utterance, including
+              the pre-buffer).
+            - ``None`` – no event (audio_data is ``None``).
+        """
         # Energy gate — only applied when NOT in speech.
         # During speech we MUST forward all chunks (including silence)
         # to Silero so it can count consecutive silent frames and
@@ -87,6 +136,11 @@ class VoiceActivityDetector:
         return (None, None)
 
     def reset(self):
+        """Reset all internal state.
+
+        Called after TTS playback to prevent the assistant's own speech
+        (picked up by the microphone) from being treated as user input.
+        """
         self._vad_iterator.reset_states()
         self._audio_buffer = []
         self._pre_buffer.clear()

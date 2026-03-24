@@ -1,4 +1,20 @@
-"""Download and verify all required models before first run."""
+"""
+Model bootstrap script — download and validate all required models.
+
+Run this **once** before the first launch to ensure every model file
+is present and loadable.  The script validates each stage in order:
+
+1. **CUDA** – check PyTorch can see the GPU.
+2. **VAD** – download/cache Silero-VAD from ``torch.hub``.
+3. **Whisper** – initialise the ``pywhispercpp`` model cache.
+4. **LLM** – download the GGUF file from HuggingFace if missing.
+5. **TTS** – initialise the Coqui TTS model cache.
+
+Usage::
+
+    pixi run setup-models
+    # or: python setup_models.py
+"""
 
 import os
 import sys
@@ -6,8 +22,16 @@ from pathlib import Path
 
 from config import Config
 
+# ── CUDA DLL setup (must run before torch / CUDA-backed imports) ──
+_cuda_path = os.environ.get("CUDA_PATH", r"D:\cuda")
+for _p in [os.path.join(_cuda_path, "bin", "x64"), os.path.join(_cuda_path, "bin")]:
+    if hasattr(os, "add_dll_directory") and os.path.isdir(_p):
+        os.add_dll_directory(_p)
+        os.environ["PATH"] = _p + os.pathsep + os.environ.get("PATH", "")
+
 
 def check_cuda():
+    """Verify that PyTorch is installed and can see a CUDA GPU."""
     print("Checking CUDA availability...")
     try:
         import torch
@@ -25,6 +49,7 @@ def check_cuda():
 
 
 def setup_whisper(config: Config):
+    """Load the configured Whisper model to warm up the cache."""
     print(f"\nSetting up Whisper model '{config.whisper_model}'...")
     try:
         from pywhispercpp.model import Model
@@ -38,7 +63,8 @@ def setup_whisper(config: Config):
 
 
 def setup_llm(config: Config):
-    print(f"\nSetting up LLM model...")
+    """Download the GGUF model from HuggingFace if it is not already present."""
+    print("\nSetting up LLM model...")
     model_path = Path(config.llm_model_path)
 
     if model_path.exists():
@@ -59,7 +85,7 @@ def setup_llm(config: Config):
         )
         print(f"  Downloaded to: {downloaded_path}")
 
-        # Rename to expected path if different
+        # Rename to the expected path if hf_hub_download placed it elsewhere.
         downloaded = Path(downloaded_path)
         if downloaded != model_path and downloaded.exists():
             downloaded.rename(model_path)
@@ -75,11 +101,12 @@ def setup_llm(config: Config):
 
 
 def setup_tts(config: Config):
+    """Load the configured Coqui TTS model (CPU-only) to warm up the cache."""
     print(f"\nSetting up TTS model '{config.tts_model}'...")
     try:
         from TTS.api import TTS
 
-        tts = TTS(model_name=config.tts_model, gpu=False)  # CPU for setup only
+        tts = TTS(model_name=config.tts_model, gpu=False)  # CPU-only for setup
         print(f"  TTS model '{config.tts_model}' is ready.")
         del tts
     except Exception as e:
@@ -88,6 +115,7 @@ def setup_tts(config: Config):
 
 
 def setup_vad():
+    """Load Silero-VAD to ensure it is cached by ``torch.hub``."""
     print("\nSetting up Silero-VAD model...")
     try:
         from silero_vad import load_silero_vad
@@ -101,6 +129,7 @@ def setup_vad():
 
 
 def main():
+    """Run all model-setup stages sequentially."""
     config = Config()
 
     print("=" * 50)

@@ -92,7 +92,7 @@ The Pixi workspace provides:
 - `git`
 - `ninja`
 - `colcon-common-extensions`
-- `setuptools<=58.2.0`
+- `setuptools>=69.5,<80`
 - `ros-humble-desktop`
 
 The bootstrap task installs:
@@ -101,6 +101,9 @@ The bootstrap task installs:
 - `llama-cpp-python` compiled with `GGML_CUDA=on`
 - `pywhispercpp` compiled with CUDA flags
 - the remaining packages from `requirements.txt`
+
+It also enforces a `setuptools` version that stays compatible with both `sip`
+and ROS 2 Humble's `colcon` editable Python build flow.
 
 `requirements.txt` is still not the full environment by itself. `torch`, `llama-cpp-python`, and `pywhispercpp` are installed separately because they need a custom wheel index or CUDA-specific build flags.
 
@@ -112,6 +115,9 @@ If you do not want to use `install.bat`, the equivalent commands are:
 pixi install
 pixi run install-python-deps
 ```
+
+`pixi run build` also re-checks the `setuptools` compatibility window before
+invoking `colcon`.
 
 ### 4. Download models
 

@@ -1,8 +1,27 @@
+# Models (downloaded by setup_models.py)
 /models/*
+
+# Python
+__pycache__/
+*.egg-info/
+*.pyc
+
+# Virtual environments
 /venv/
 /.pixi/
-__pycache__/
-/.claude/
+
+# ROS 2 colcon build artifacts
 /build/
 /install/
 /log/
+
+# Setuptools probe directories (left by pip/colcon)
+.tmp_setuptools_probe*/
+
+# IDE / editor
+/.claude/
+*.swp
+*.swo
+
+# Debug / temp output
+qt_debug.txt

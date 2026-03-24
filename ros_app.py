@@ -1,46 +1,54 @@
 """
-Voice Chatbot – standalone PySide6 desktop GUI.
+Voice Chatbot – ROS 2 PySide6 desktop GUI.
 
-This is the primary graphical interface.  It loads **all** pipeline
-models (VAD, Whisper STT, LLM, Coqui TTS) in-process via a background
-:class:`QThread` and runs the audio loop there so the UI stays
-responsive.
+Unlike the standalone ``app.py``, this GUI does **not** load any ML
+models itself.  Instead it connects to the three split ROS 2 nodes
+(STT, LLM, TTS) running in separate processes and communicates via
+ROS 2 topics and services.
 
-Layout::
+ROS 2 topic/service interface (all in ``/voice_chatbot/`` namespace):
 
-    ┌──────────────────────────────────────────────────┐
-    │  Toolbar: [Käynnistä] [Pysäytä] [Uudelleen] ... │
-    ├──────────┬───────────────────────────────────────┤
-    │ Settings │  Keskustelu (chat display)            │
-    │ panel    │                                       │
-    │          ├───────────────────────────────────────┤
-    │          │  Järjestelmäloki (system log)         │
-    └──────────┴───────────────────────────────────────┘
+====================  ============  =================================
+Topic / Service       Direction     Purpose
+====================  ============  =================================
+``log``               subscribe     System log messages from all nodes
+``status``            subscribe     Pipeline state (``listening``, …)
+``transcript``        subscribe     User speech transcription
+``assistant_text``    subscribe     LLM reply text
+``user_text``         **publish**   Send typed text to the LLM node
+``clear_history``     service call  Clear LLM conversation memory
+====================  ============  =================================
 
-Key design decisions:
-
-- **DLL workaround** – PySide6 is pip-installed but the pixi env also
-  ships Qt (via Robostack).  We force Windows to prefer the PySide6
-  DLLs and override ``QT_PLUGIN_PATH`` to avoid plugin conflicts.
-- **CUDA DLL setup** – ``os.add_dll_directory`` for the CUDA toolkit
-  must run before any ``torch`` / ``llama_cpp`` import.
-- **Deferred imports** – Heavy libraries (torch, whisper, llama_cpp,
-  TTS) are imported inside the worker thread to keep the GUI startup
-  instant.
-- **Thread safety** – All worker → UI communication uses Qt signals
-  with ``QueuedConnection`` so slot code always runs on the main
-  thread.
+A background :class:`QThread` spins the ROS 2 node so that callbacks
+fire without blocking the Qt event loop.
 
 Usage::
 
-    pixi run app
-    # or: python app.py
+    pixi run ros-app
+    # or: python ros_app.py
 """
 
 import os
 import sys
-import traceback
 from pathlib import Path
+
+# ── PySide6 DLL workaround (must run before Qt widget imports) ─────
+_site_packages = [Path(p) for p in sys.path if "site-packages" in p]
+_pyside_dir = None
+for _pkg_name in ("PySide6", "shiboken6"):
+    for _base in _site_packages:
+        _dll_dir = _base / _pkg_name
+        if hasattr(os, "add_dll_directory") and _dll_dir.is_dir():
+            os.add_dll_directory(str(_dll_dir))
+            os.environ["PATH"] = str(_dll_dir) + os.pathsep + os.environ.get("PATH", "")
+            if _pkg_name == "PySide6":
+                _pyside_dir = _dll_dir
+
+if _pyside_dir is not None:
+    _plugins_dir = _pyside_dir / "plugins"
+    _platforms_dir = _plugins_dir / "platforms"
+    os.environ["QT_PLUGIN_PATH"] = str(_plugins_dir)
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(_platforms_dir)
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QFont, QTextCursor
@@ -67,72 +75,27 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import rclpy
+from rclpy.node import Node as RosNode
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
+
 from config import Config
-
-# ── PySide6 / Robostack DLL conflict workaround ──────────────────
-# Prefer the pip-installed PySide6 Qt runtime over any Qt DLLs shipped
-# by Robostack (ros-humble-desktop).  Without this, Windows loads the
-# wrong platform plugin and the application crashes on startup.
-_site_packages = [Path(p) for p in sys.path if "site-packages" in p]
-_pyside_dir = None
-for _pkg_name in ("PySide6", "shiboken6"):
-    for _base in _site_packages:
-        _dll_dir = _base / _pkg_name
-        if hasattr(os, "add_dll_directory") and _dll_dir.is_dir():
-            os.add_dll_directory(str(_dll_dir))
-            os.environ["PATH"] = str(_dll_dir) + os.pathsep + os.environ.get("PATH", "")
-            if _pkg_name == "PySide6":
-                _pyside_dir = _dll_dir
-
-if _pyside_dir is not None:
-    # Pixi/Robostack exports QT_PLUGIN_PATH to its own Qt runtime, which
-    # conflicts with the pip-installed PySide6 platform plugins on Windows.
-    _plugins_dir = _pyside_dir / "plugins"
-    _platforms_dir = _plugins_dir / "platforms"
-    os.environ["QT_PLUGIN_PATH"] = str(_plugins_dir)
-    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(_platforms_dir)
-
-
-# ── CUDA DLL setup (must run before any CUDA-dependent imports) ────
-_cuda_path = os.environ.get("CUDA_PATH", r"D:\cuda")
-for _p in [os.path.join(_cuda_path, "bin", "x64"), os.path.join(_cuda_path, "bin")]:
-    if os.path.isdir(_p):
-        os.add_dll_directory(_p)
-        os.environ["PATH"] = _p + os.pathsep + os.environ.get("PATH", "")
-
 
 # ── Constants ──────────────────────────────────────────────────────
 
 WHISPER_MODELS = [
-    "tiny",
-    "tiny.en",
-    "base",
-    "base.en",
-    "small",
-    "small.en",
-    "medium",
-    "medium.en",
-    "large-v1",
-    "large-v2",
-    "large-v3",
+    "tiny", "tiny.en", "base", "base.en",
+    "small", "small.en", "medium", "medium.en",
+    "large-v1", "large-v2", "large-v3",
 ]
 
 LANGUAGES = {
-    "Suomi (fi)": "fi",
-    "English (en)": "en",
-    "Auto": "auto",
-    "Svenska (sv)": "sv",
-    "Deutsch (de)": "de",
-    "Francais (fr)": "fr",
-    "Espanol (es)": "es",
-    "Italiano (it)": "it",
-    "Portugues (pt)": "pt",
-    "Nederlands (nl)": "nl",
-    "Polski (pl)": "pl",
-    "Japanese (ja)": "ja",
-    "Chinese (zh)": "zh",
-    "Korean (ko)": "ko",
-    "Russian (ru)": "ru",
+    "Suomi (fi)": "fi", "English (en)": "en", "Auto": "auto",
+    "Svenska (sv)": "sv", "Deutsch (de)": "de", "Francais (fr)": "fr",
+    "Espanol (es)": "es", "Italiano (it)": "it", "Portugues (pt)": "pt",
+    "Nederlands (nl)": "nl", "Polski (pl)": "pl", "Japanese (ja)": "ja",
+    "Chinese (zh)": "zh", "Korean (ko)": "ko", "Russian (ru)": "ru",
 }
 
 TTS_MODELS = [
@@ -150,177 +113,158 @@ TTS_MODELS = [
     "tts_models/multilingual/multi-dataset/xtts_v2",
 ]
 
-
-# ── Stdout / stderr redirect → Qt signal ──────────────────────────
-
-
-class LogStream(QObject):
-    """Captures writes to sys.stdout / sys.stderr and emits them as signals."""
-
-    message = Signal(str)
-
-    def write(self, text: str) -> None:
-        if text and text.strip():
-            self.message.emit(text.rstrip("\n"))
-
-    def flush(self) -> None:
-        pass
+# Map ROS status strings → Finnish UI text
+_STATUS_MAP = {
+    "initializing": "Alustetaan...",
+    "ready": "Valmis",
+    "listening": "Kuunnellaan...",
+    "speech_detected": "Puhe havaittu...",
+    "transcribing": "Käsitellään...",
+    "llm_responding": "LLM vastaa...",
+    "speaking": "Puhutaan...",
+    "error": "Virhe",
+}
 
 
-# ── Background worker ─────────────────────────────────────────────
+# ── ROS 2 spin thread ─────────────────────────────────────────────
 
 
-class ChatbotWorker(QThread):
-    """Background thread that loads all pipeline models and runs the audio loop.
+class _RosSpinThread(QThread):
+    """Spins the ROS 2 node in a background thread.
 
-    Emitted signals (all use ``QueuedConnection`` for thread safety):
-
-    - ``log(str)`` – informational messages for the system log panel.
-    - ``chat_message(role, text)`` – a user or assistant chat message.
-    - ``status_changed(str)`` – pipeline state change (Finnish label).
-    - ``error_occurred(str)`` – full traceback on unrecoverable errors.
-    - ``models_ready()`` – all five models loaded successfully.
-
-    The thread is stopped by calling :meth:`stop`, which sets an
-    internal flag checked on every audio-loop iteration.
+    Calls ``rclpy.spin_once`` in a tight loop (50 ms timeout) so that
+    subscription callbacks and service responses are processed without
+    blocking the Qt event loop.
     """
 
-    log = Signal(str)
-    chat_message = Signal(str, str)  # (role, text)
-    status_changed = Signal(str)
-    error_occurred = Signal(str)
-    models_ready = Signal()
-
-    def __init__(self, config: Config, parent: QObject | None = None):
+    def __init__(self, node: RosNode, parent: QObject | None = None):
         super().__init__(parent)
-        self._config = config
-        self._running = False
+        self._node = node
+        self._running = True
 
-    # ── public ──
+    def run(self) -> None:
+        while self._running and rclpy.ok():
+            rclpy.spin_once(self._node, timeout_sec=0.05)
 
     def stop(self) -> None:
         self._running = False
 
-    # ── thread entry ──
 
-    def run(self) -> None:  # noqa: C901 (complexity ok for worker)
-        self._running = True
+# ── ROS 2 ↔ Qt bridge ─────────────────────────────────────────────
 
-        # Redirect stdout/stderr so library prints appear in the log panel
-        log_stream = LogStream()
-        log_stream.message.connect(self.log.emit, Qt.ConnectionType.QueuedConnection)
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = log_stream
-        sys.stderr = log_stream
 
-        audio = None
-        try:
-            self._emit_system_info()
+class RosBridge(QObject):
+    """Bridges ROS 2 topics/services to Qt signals.
 
-            # ── Load models ──
-            self.status_changed.emit("Ladataan malleja...")
+    Creates a lightweight ``rclpy`` node (``voice_chatbot_gui``) that
+    subscribes to the split-node topics and emits Qt signals when
+    messages arrive.  Also provides :meth:`send_text` (publish) and
+    :meth:`clear_history` (service call) for outbound commands.
 
-            self.log.emit("[Init] Audio I/O...")
-            from audio_io import AudioIO
+    The ROS spin loop runs in a :class:`_RosSpinThread`.  ROS
+    callbacks emit Qt signals which, via ``QueuedConnection``, are
+    delivered on the main thread — safe for direct UI updates.
+    """
 
-            audio = AudioIO(self._config)
+    log_received = Signal(str)
+    status_received = Signal(str)
+    chat_message = Signal(str, str)  # (role, text)
 
-            self.log.emit("[Init] Silero-VAD...")
-            from vad import VoiceActivityDetector
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        self._node: RosNode | None = None
+        self._spin_thread: _RosSpinThread | None = None
+        self._user_pub = None
+        self._clear_client = None
 
-            vad = VoiceActivityDetector(self._config)
+    @property
+    def is_connected(self) -> bool:
+        return self._node is not None
 
-            self.log.emit("[Init] Whisper STT...")
-            from stt import SpeechToText
+    def connect_ros(self) -> None:
+        if self._node is not None:
+            return
 
-            stt = SpeechToText(self._config)
+        rclpy.init()
+        self._node = RosNode("voice_chatbot_gui")
 
-            self.log.emit("[Init] LLM...")
-            from llm import ChatLLM
+        # Subscriptions (absolute topic names matching the split nodes' namespace)
+        self._node.create_subscription(
+            String, "/voice_chatbot/log", self._on_log, 50
+        )
+        self._node.create_subscription(
+            String, "/voice_chatbot/status", self._on_status, 10
+        )
+        self._node.create_subscription(
+            String, "/voice_chatbot/transcript", self._on_transcript, 10
+        )
+        self._node.create_subscription(
+            String, "/voice_chatbot/assistant_text", self._on_assistant, 10
+        )
 
-            llm = ChatLLM(self._config)
+        # Publisher for sending typed text
+        self._user_pub = self._node.create_publisher(
+            String, "/voice_chatbot/user_text", 10
+        )
 
-            self.log.emit("[Init] Coqui TTS...")
-            from tts_engine import TextToSpeech
+        # Service client for clearing LLM history
+        self._clear_client = self._node.create_client(
+            Trigger, "/voice_chatbot/clear_history"
+        )
 
-            tts = TextToSpeech(self._config)
+        self._spin_thread = _RosSpinThread(self._node)
+        self._spin_thread.start()
 
-            self.log.emit("Kaikki mallit ladattu onnistuneesti!")
-            self.models_ready.emit()
-            self.status_changed.emit("Kuunnellaan...")
+    def disconnect_ros(self) -> None:
+        if self._node is None:
+            return
 
-            # ── Audio loop ──
-            audio.start_capture()
+        if self._spin_thread is not None:
+            self._spin_thread.stop()
+            self._spin_thread.wait(3000)
+            self._spin_thread = None
 
-            while self._running:
-                chunk = audio.get_audio_chunk(timeout=0.1)
-                if chunk is None:
-                    continue
+        self._user_pub = None
+        self._clear_client = None
+        self._node.destroy_node()
+        self._node = None
+        rclpy.try_shutdown()
 
-                event, audio_data = vad.process_chunk(chunk)
+    def send_text(self, text: str) -> None:
+        if self._user_pub is not None:
+            self._user_pub.publish(String(data=text))
+            self.chat_message.emit("user", text)
 
-                if event == "speech_start":
-                    self.status_changed.emit("Puhe havaittu...")
+    def clear_history(self) -> None:
+        if self._clear_client is not None and self._clear_client.service_is_ready():
+            self._clear_client.call_async(Trigger.Request())
+            self.log_received.emit("Keskusteluhistoria tyhjennetty.")
 
-                elif event == "speech_end":
-                    self.status_changed.emit("Käsitellään...")
-                    if audio_data is not None:
-                        text = stt.transcribe(audio_data)
-                        if not text or text.isspace():
-                            self.status_changed.emit("Kuunnellaan...")
-                            continue
+    # ── ROS callbacks (called from spin thread) ──
 
-                        self.chat_message.emit("user", text)
+    def _on_log(self, msg: String) -> None:
+        self.log_received.emit(msg.data)
 
-                        self.status_changed.emit("LLM vastaa...")
-                        response = llm.chat(text)
-                        self.chat_message.emit("assistant", response)
+    def _on_status(self, msg: String) -> None:
+        text = _STATUS_MAP.get(msg.data, msg.data)
+        self.status_received.emit(text)
 
-                        self.status_changed.emit("Puhutaan...")
-                        audio_out, sr = tts.synthesize(response)
-                        audio.play_audio(audio_out, sr)
+    def _on_transcript(self, msg: String) -> None:
+        self.chat_message.emit("user", msg.data)
 
-                        audio.clear_queue()
-                        vad.reset()
-                        self.status_changed.emit("Kuunnellaan...")
-
-        except Exception:
-            self.error_occurred.emit(traceback.format_exc())
-
-        finally:
-            if audio is not None:
-                audio.close()
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            self.status_changed.emit("Pysäytetty")
-
-    # ── helpers ──
-
-    def _emit_system_info(self) -> None:
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                name = torch.cuda.get_device_name(0)
-                vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                self.log.emit(f"GPU: {name} ({vram:.1f} GB)")
-                self.log.emit(f"CUDA: {torch.version.cuda}")
-            else:
-                self.log.emit("VAROITUS: CUDA ei saatavilla – mallit ajetaan CPU:lla.")
-        except ImportError:
-            self.log.emit("VAROITUS: PyTorch ei asennettu.")
+    def _on_assistant(self, msg: String) -> None:
+        self.chat_message.emit("assistant", msg.data)
 
 
 # ── Settings panel ─────────────────────────────────────────────────
 
 
 class SettingsPanel(QScrollArea):
-    """Left sidebar with all editable model and pipeline settings.
+    """Left sidebar with all editable settings.
 
-    Each widget maps 1:1 to a :class:`Config` field.  Call
-    :meth:`load_from_config` to populate the widgets and
-    :meth:`write_to_config` to read them back.  The panel remains
-    editable while the chatbot is running — press *Restart* to apply.
+    Identical widget set to the standalone ``app.py`` panel.  Changes
+    are only written to ``config.json`` when the user clicks *Save* —
+    they take effect after the ROS 2 nodes are restarted.
     """
 
     def __init__(self, config: Config, parent: QWidget | None = None):
@@ -434,10 +378,6 @@ class SettingsPanel(QScrollArea):
         self.spin_pre_buffer.setRange(100, 2000)
         self.spin_pre_buffer.setSingleStep(50)
         self.spin_pre_buffer.setSuffix(" ms")
-        self.spin_pre_buffer.setToolTip(
-            "Ääntä tallennetaan ennen puheen tunnistusta, "
-            "jotta ensimmäiset tavut eivät leikkaudu pois."
-        )
         form_vad.addRow("Esipuskuri:", self.spin_pre_buffer)
 
         layout.addWidget(grp_vad)
@@ -445,39 +385,31 @@ class SettingsPanel(QScrollArea):
         # ── TTS extra ──
         grp_tts = QGroupBox("TTS-asetukset")
         form_tts = QFormLayout(grp_tts)
-
         self.chk_tts_gpu = QCheckBox("Käytä GPU:ta")
         form_tts.addRow(self.chk_tts_gpu)
-
         layout.addWidget(grp_tts)
 
         layout.addStretch()
         self.setWidget(container)
 
-        # ── Populate from config ──
         self.load_from_config(config)
-
-    # ── config ↔ widgets ──
 
     def load_from_config(self, cfg: Config) -> None:
         _set_combo_by_data(self.combo_language, cfg.language)
         _set_combo_by_text(self.combo_whisper, cfg.whisper_model)
         self.edit_llm_path.setText(cfg.llm_model_path)
         _set_combo_by_text(self.combo_tts, cfg.tts_model)
-
         self.spin_temperature.setValue(cfg.llm_temperature)
         self.spin_max_tokens.setValue(cfg.llm_max_tokens)
         self.spin_ctx.setValue(cfg.llm_n_ctx)
         self.spin_gpu_layers.setValue(cfg.llm_n_gpu_layers)
         self.spin_turns.setValue(cfg.max_conversation_turns)
         self.edit_system_prompt.setPlainText(cfg.llm_system_prompt)
-
         self.spin_vad_threshold.setValue(cfg.vad_threshold)
         self.spin_silence_ms.setValue(cfg.min_silence_duration_ms)
         self.spin_speech_pad.setValue(cfg.speech_pad_ms)
         self.spin_min_speech.setValue(cfg.min_speech_duration_ms)
         self.spin_pre_buffer.setValue(cfg.vad_pre_buffer_ms)
-
         self.chk_tts_gpu.setChecked(cfg.tts_gpu)
 
     def write_to_config(self, cfg: Config) -> Config:
@@ -485,24 +417,19 @@ class SettingsPanel(QScrollArea):
         cfg.whisper_model = self.combo_whisper.currentText()
         cfg.llm_model_path = self.edit_llm_path.text()
         cfg.tts_model = self.combo_tts.currentText()
-
         cfg.llm_temperature = self.spin_temperature.value()
         cfg.llm_max_tokens = self.spin_max_tokens.value()
         cfg.llm_n_ctx = self.spin_ctx.value()
         cfg.llm_n_gpu_layers = self.spin_gpu_layers.value()
         cfg.max_conversation_turns = self.spin_turns.value()
         cfg.llm_system_prompt = self.edit_system_prompt.toPlainText()
-
         cfg.vad_threshold = self.spin_vad_threshold.value()
         cfg.min_silence_duration_ms = self.spin_silence_ms.value()
         cfg.speech_pad_ms = self.spin_speech_pad.value()
         cfg.min_speech_duration_ms = self.spin_min_speech.value()
         cfg.vad_pre_buffer_ms = self.spin_pre_buffer.value()
-
         cfg.tts_gpu = self.chk_tts_gpu.isChecked()
         return cfg
-
-    # ── slots ──
 
     def _browse_llm(self) -> None:
         start_dir = str(Path(self.edit_llm_path.text()).parent)
@@ -519,25 +446,24 @@ class SettingsPanel(QScrollArea):
 
 
 class MainWindow(QMainWindow):
-    """Top-level window: toolbar, settings panel, chat display, and log.
+    """Top-level ROS 2 GUI window.
 
-    Owns the :class:`ChatbotWorker` lifecycle (start / stop / restart).
-    Settings are saved to ``config.json`` on every start so that the
-    next launch remembers the user's choices.
+    Adds a text-input row (compared to the standalone GUI) so the user
+    can type messages that are published to ``/voice_chatbot/user_text``
+    even when no microphone is available.
     """
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Äänichatbot")
+        self.setWindowTitle("Äänichatbot (ROS 2)")
         self.resize(1100, 720)
 
         self._config = Config.load()
-        self._worker: ChatbotWorker | None = None
-        self._pending_restart = False
+        self._bridge = RosBridge(self)
 
         self._build_ui()
         self._connect_signals()
-        self._set_running_state(False)
+        self._set_connected_state(False)
 
     # ── UI construction ──
 
@@ -545,40 +471,36 @@ class MainWindow(QMainWindow):
         # ── Toolbar ──
         toolbar = self.addToolBar("Hallinta")
         toolbar.setMovable(False)
-        toolbar.setIconSize(toolbar.iconSize())
 
-        self.btn_start = QPushButton("  Käynnistä")
-        self.btn_start.setMinimumHeight(32)
-        self.btn_start.setStyleSheet(
+        self.btn_connect = QPushButton("  Yhdistä")
+        self.btn_connect.setMinimumHeight(32)
+        self.btn_connect.setStyleSheet(
             "QPushButton { background-color: #2e7d32; color: white; "
             "font-weight: bold; padding: 4px 16px; border-radius: 4px; }"
             "QPushButton:hover { background-color: #388e3c; }"
             "QPushButton:disabled { background-color: #666; }"
         )
-        toolbar.addWidget(self.btn_start)
+        toolbar.addWidget(self.btn_connect)
 
-        self.btn_stop = QPushButton("  Pysäytä")
-        self.btn_stop.setMinimumHeight(32)
-        self.btn_stop.setStyleSheet(
+        self.btn_disconnect = QPushButton("  Katkaise")
+        self.btn_disconnect.setMinimumHeight(32)
+        self.btn_disconnect.setStyleSheet(
             "QPushButton { background-color: #c62828; color: white; "
             "font-weight: bold; padding: 4px 16px; border-radius: 4px; }"
             "QPushButton:hover { background-color: #d32f2f; }"
             "QPushButton:disabled { background-color: #666; }"
         )
-        toolbar.addWidget(self.btn_stop)
+        toolbar.addWidget(self.btn_disconnect)
 
-        self.btn_restart = QPushButton("  Käynnistä uudelleen")
-        self.btn_restart.setMinimumHeight(32)
-        self.btn_restart.setToolTip(
-            "Pysäytä ja käynnistä uudelleen uusilla asetuksilla"
-        )
-        self.btn_restart.setStyleSheet(
-            "QPushButton { background-color: #e65100; color: white; "
+        self.btn_save = QPushButton("  Tallenna asetukset")
+        self.btn_save.setMinimumHeight(32)
+        self.btn_save.setToolTip("Tallenna asetukset config.json-tiedostoon (voimaan nodien uudelleenkäynnistyksellä)")
+        self.btn_save.setStyleSheet(
+            "QPushButton { background-color: #1565c0; color: white; "
             "font-weight: bold; padding: 4px 16px; border-radius: 4px; }"
-            "QPushButton:hover { background-color: #ef6c00; }"
-            "QPushButton:disabled { background-color: #666; }"
+            "QPushButton:hover { background-color: #1976d2; }"
         )
-        toolbar.addWidget(self.btn_restart)
+        toolbar.addWidget(self.btn_save)
 
         self.btn_clear = QPushButton("  Tyhjennä keskustelu")
         self.btn_clear.setMinimumHeight(32)
@@ -591,7 +513,7 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
 
-        self.label_status = QLabel("Tila: Valmis")
+        self.label_status = QLabel("Tila: Ei yhdistetty")
         self.label_status.setTextFormat(Qt.TextFormat.RichText)
         self.label_status.setStyleSheet("font-weight: bold; padding-right: 12px;")
         toolbar.addWidget(self.label_status)
@@ -607,7 +529,7 @@ class MainWindow(QMainWindow):
         self.settings_panel = SettingsPanel(self._config)
         main_layout.addWidget(self.settings_panel)
 
-        # Right side: chat + log
+        # Right side: chat + text input + log
         right_splitter = QSplitter(Qt.Orientation.Vertical)
         right_splitter.setChildrenCollapsible(False)
 
@@ -627,6 +549,25 @@ class MainWindow(QMainWindow):
             "border: 1px solid #45475a; border-radius: 4px; padding: 8px; }"
         )
         chat_layout.addWidget(self.chat_display)
+
+        # Text input row
+        input_row = QHBoxLayout()
+        self.text_input = QLineEdit()
+        self.text_input.setPlaceholderText("Kirjoita viesti...")
+        self.text_input.setMinimumHeight(32)
+        self.text_input.setFont(QFont("Segoe UI", 11))
+        self.btn_send = QPushButton("Lähetä")
+        self.btn_send.setMinimumHeight(32)
+        self.btn_send.setStyleSheet(
+            "QPushButton { background-color: #2e7d32; color: white; "
+            "font-weight: bold; padding: 4px 16px; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #388e3c; }"
+            "QPushButton:disabled { background-color: #666; }"
+        )
+        input_row.addWidget(self.text_input)
+        input_row.addWidget(self.btn_send)
+        chat_layout.addLayout(input_row)
+
         right_splitter.addWidget(chat_container)
 
         # Log panel
@@ -651,126 +592,84 @@ class MainWindow(QMainWindow):
         right_splitter.setSizes([480, 200])
         main_layout.addWidget(right_splitter, stretch=1)
 
-        # ── Status bar ──
-        self.statusBar().showMessage("Valmis")
+        self.statusBar().showMessage("Ei yhdistetty")
 
     # ── Signal wiring ──
 
     def _connect_signals(self) -> None:
-        self.btn_start.clicked.connect(self._on_start)
-        self.btn_stop.clicked.connect(self._on_stop)
-        self.btn_restart.clicked.connect(self._on_restart)
+        self.btn_connect.clicked.connect(self._on_connect)
+        self.btn_disconnect.clicked.connect(self._on_disconnect)
+        self.btn_save.clicked.connect(self._on_save_settings)
         self.btn_clear.clicked.connect(self._on_clear)
+        self.btn_send.clicked.connect(self._on_send)
+        self.text_input.returnPressed.connect(self._on_send)
+
+        self._bridge.log_received.connect(
+            self._append_log, Qt.ConnectionType.QueuedConnection
+        )
+        self._bridge.status_received.connect(
+            self._update_status, Qt.ConnectionType.QueuedConnection
+        )
+        self._bridge.chat_message.connect(
+            self._append_chat, Qt.ConnectionType.QueuedConnection
+        )
 
     # ── State helpers ──
 
-    def _set_running_state(self, running: bool) -> None:
-        self.btn_start.setEnabled(not running)
-        self.btn_stop.setEnabled(running)
-        self.btn_restart.setEnabled(running)
-        # Settings always editable — use Restart to apply while running
-        self.settings_panel.setEnabled(True)
-
-    def _build_config_from_ui(self) -> Config:
-        """Build a fresh Config from current UI widget values."""
-        cfg = Config()
-        self.settings_panel.write_to_config(cfg)
-        cfg.save()
-        return cfg
+    def _set_connected_state(self, connected: bool) -> None:
+        self.btn_connect.setEnabled(not connected)
+        self.btn_disconnect.setEnabled(connected)
+        self.btn_send.setEnabled(connected)
+        self.text_input.setEnabled(connected)
 
     # ── Slots ──
 
-    def _on_start(self) -> None:
-        # Ensure any previous worker is fully stopped
-        if self._worker is not None:
-            self._worker.stop()
-            self._worker.wait(5000)
-            self._worker = None
+    def _on_connect(self) -> None:
+        try:
+            self._bridge.connect_ros()
+            self._set_connected_state(True)
+            self._update_status("Yhdistetty")
+            self._append_log("ROS 2 -yhteys muodostettu.")
+        except Exception as exc:
+            self._append_log(f"VIRHE: ROS 2 -yhteys epäonnistui: {exc}")
 
-        # Build config directly from current UI values (not from config.json)
-        self._config = self._build_config_from_ui()
+    def _on_disconnect(self) -> None:
+        self._bridge.disconnect_ros()
+        self._set_connected_state(False)
+        self._update_status("Ei yhdistetty")
+        self._append_log("ROS 2 -yhteys katkaistu.")
 
-        # Validate LLM path
-        if not Path(self._config.llm_model_path).exists():
-            self._append_log(
-                f"VIRHE: LLM-mallia ei löydy: {self._config.llm_model_path}"
-            )
-            self._append_log("Suorita ensin: python setup_models.py")
-            return
-
-        self._set_running_state(True)
-        self.log_display.clear()
-        self._append_log("Käynnistetään...")
-
-        self._worker = ChatbotWorker(self._config)
-        self._worker.log.connect(self._append_log, Qt.ConnectionType.QueuedConnection)
-        self._worker.chat_message.connect(
-            self._append_chat, Qt.ConnectionType.QueuedConnection
-        )
-        self._worker.status_changed.connect(
-            self._update_status, Qt.ConnectionType.QueuedConnection
-        )
-        self._worker.error_occurred.connect(
-            self._on_error, Qt.ConnectionType.QueuedConnection
-        )
-        self._worker.models_ready.connect(
-            lambda: self._append_log("Kaikki mallit valmiina."),
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.start()
-
-    def _on_stop(self) -> None:
-        if self._worker is not None:
-            self._append_log("Pysäytetään...")
-            self._worker.stop()
-            self.btn_stop.setEnabled(False)
-            self.btn_restart.setEnabled(False)
-
-    def _on_restart(self) -> None:
-        """Stop current worker and start a new one with current UI settings."""
-        self._append_log("Käynnistetään uudelleen uusilla asetuksilla...")
-        self._pending_restart = True
-        if self._worker is not None:
-            self._worker.stop()
-        else:
-            self._on_start()
+    def _on_save_settings(self) -> None:
+        cfg = Config()
+        self.settings_panel.write_to_config(cfg)
+        cfg.save()
+        self._append_log("Asetukset tallennettu config.json-tiedostoon.")
 
     def _on_clear(self) -> None:
         self.chat_display.clear()
+        self._bridge.clear_history()
 
-    def _on_worker_finished(self) -> None:
-        self._worker = None
-
-        # If a restart was requested, start again immediately
-        if getattr(self, "_pending_restart", False):
-            self._pending_restart = False
-            self._on_start()
+    def _on_send(self) -> None:
+        text = self.text_input.text().strip()
+        if not text:
             return
-
-        self._set_running_state(False)
-        self._update_status("Pysäytetty")
-        self._append_log("Chatbot pysäytetty.")
-
-    def _on_error(self, error_text: str) -> None:
-        self._append_log(f"VIRHE:\n{error_text}")
-        self._update_status("Virhe")
+        self.text_input.clear()
+        self._bridge.send_text(text)
 
     # ── UI update helpers ──
 
     def _append_log(self, text: str) -> None:
         self.log_display.appendPlainText(text)
-        # Auto-scroll to bottom
         cursor = self.log_display.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.log_display.setTextCursor(cursor)
 
     def _append_chat(self, role: str, text: str) -> None:
         if role == "user":
-            color = "#89b4fa"  # blue
+            color = "#89b4fa"
             prefix = "Sinä"
         else:
-            color = "#a6e3a1"  # green
+            color = "#a6e3a1"
             prefix = "Botti"
 
         html = (
@@ -780,15 +679,12 @@ class MainWindow(QMainWindow):
             f"</p>"
         )
         self.chat_display.append(html)
-
-        # Auto-scroll
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.chat_display.setTextCursor(cursor)
 
     def _update_status(self, text: str) -> None:
-        # Pick an indicator color
-        if "Kuunnellaan" in text:
+        if "Kuunnellaan" in text or "Yhdistetty" in text:
             indicator = '<span style="color: #a6e3a1;">&#9679;</span>'
         elif "Käsitellään" in text or "vastaa" in text or "Puhutaan" in text:
             indicator = '<span style="color: #f9e2af;">&#9679;</span>'
@@ -805,9 +701,7 @@ class MainWindow(QMainWindow):
     # ── Window close ──
 
     def closeEvent(self, event) -> None:
-        if self._worker is not None:
-            self._worker.stop()
-            self._worker.wait(5000)
+        self._bridge.disconnect_ros()
         event.accept()
 
 
@@ -843,8 +737,6 @@ def _set_combo_by_text(combo: QComboBox, text: str) -> None:
 
 def main() -> None:
     app = QApplication(sys.argv)
-
-    # Apply a subtle global stylesheet
     app.setStyle("Fusion")
     app.setStyleSheet(
         """

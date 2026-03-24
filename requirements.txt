@@ -4,4 +4,4 @@ silero-vad
 sounddevice
 numpy
 huggingface-hub
-PySide6
+PySide6==6.9.2
