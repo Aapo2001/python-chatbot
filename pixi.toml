@@ -26,7 +26,7 @@ test = "python -m pytest"
 build = { cmd = "colcon build --symlink-install --packages-select voice_chatbot_ros", depends-on = ["ensure-setuptools-compat"] }
 
 [pypi-dependencies]
-pytest = ">=8,<9"
+pytest = ">=9,<10"
 
 [target.win-64.tasks]
 install-python-deps = "cmd /d /c tools\\install_python_windows.bat"
