@@ -30,6 +30,7 @@ pytest = ">=9,<10"
 
 [target.win-64.tasks]
 install-python-deps = "cmd /d /c tools\\install_python_windows.bat"
+build = { cmd = "colcon build --packages-select voice_chatbot_ros", depends-on = ["ensure-setuptools-compat"] }
 ros-node = { cmd = "cmd /d /c tools\\ros_run_pixi.bat", depends-on = ["build"] }
 ros-run = { cmd = "cmd /d /c tools\\ros_run_pixi.bat", depends-on = ["build"] }
 ros-launch = { cmd = "cmd /d /c tools\\ros_launch_pixi.bat", depends-on = ["build"] }
