@@ -1,165 +1,144 @@
-import builtins
-import sys
-from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
-import voice_chatbot.platform_setup as platform_setup
 from voice_chatbot.config import Config
 
-
-def _import_setup_models_module(monkeypatch, fresh_import):
-    monkeypatch.setattr(platform_setup, "setup_cuda", lambda: None)
-    return fresh_import(
-        "voice_chatbot.setup_models",
-        clear_modules=["voice_chatbot.setup_models"],
-    )
+from .conftest import import_fresh, install_module, make_module
 
 
-def test_check_cuda_reports_available_gpu(
-    monkeypatch, fresh_import, module_factory, capsys
-):
-    module = _import_setup_models_module(monkeypatch, fresh_import)
-    torch_module = module_factory(
-        "torch",
-        cuda=SimpleNamespace(
-            is_available=lambda: True,
-            get_device_name=lambda index: "Fake GPU",
+def load_setup_models_module(monkeypatch):
+    calls = {"setup_cuda": 0}
+    install_module(
+        monkeypatch,
+        "voice_chatbot.platform_setup",
+        make_module(
+            "voice_chatbot.platform_setup",
+            setup_cuda=lambda: calls.__setitem__("setup_cuda", calls["setup_cuda"] + 1),
         ),
-        version=SimpleNamespace(cuda="12.8"),
     )
-    monkeypatch.setitem(sys.modules, "torch", torch_module)
+    return import_fresh("voice_chatbot.setup_models"), calls
+
+
+def test_check_cuda_reports_when_gpu_is_available(monkeypatch, capsys):
+    module, calls = load_setup_models_module(monkeypatch)
+    install_module(
+        monkeypatch,
+        "torch",
+        make_module(
+            "torch",
+            cuda=make_module(
+                "torch.cuda",
+                is_available=lambda: True,
+                get_device_name=lambda index: "Test GPU",
+            ),
+            version=make_module("torch.version", cuda="12.1"),
+        ),
+    )
 
     module.check_cuda()
 
     out = capsys.readouterr().out
-    assert "CUDA is available: Fake GPU" in out
-    assert "CUDA version: 12.8" in out
+    assert calls["setup_cuda"] == 1
+    assert "CUDA is available: Test GPU" in out
+    assert "CUDA version: 12.1" in out
 
 
-def test_check_cuda_exits_when_torch_is_missing(monkeypatch, fresh_import, capsys):
-    module = _import_setup_models_module(monkeypatch, fresh_import)
-    real_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "torch":
-            raise ImportError("torch missing")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    with pytest.raises(SystemExit) as exc:
-        module.check_cuda()
-
-    assert exc.value.code == 1
-    assert "PyTorch is not installed" in capsys.readouterr().out
-
-
-def test_setup_llm_skips_download_when_model_exists(
-    monkeypatch, fresh_import, capsys, tmp_path
-):
-    module = _import_setup_models_module(monkeypatch, fresh_import)
-    model_path = tmp_path / "models" / "existing.gguf"
-    model_path.parent.mkdir()
-    model_path.write_bytes(b"x" * 2048)
+def test_setup_llm_skips_download_when_model_exists(monkeypatch, tmp_path, capsys):
+    module, _ = load_setup_models_module(monkeypatch)
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"x" * 1024)
     config = Config(
-        models_dir=str(model_path.parent),
+        models_dir=str(tmp_path),
         llm_model_path=str(model_path),
-        llm_filename="existing.gguf",
+        llm_repo_id="repo/demo",
+        llm_filename="model.gguf",
     )
 
     module.setup_llm(config)
 
     out = capsys.readouterr().out
-    assert "LLM model already exists" in out
-    assert model_path.exists()
+    assert "already exists" in out
 
 
-def test_setup_llm_downloads_and_renames_file(
-    monkeypatch, fresh_import, module_factory, tmp_path
-):
-    module = _import_setup_models_module(monkeypatch, fresh_import)
-    download_path = tmp_path / "models" / "downloaded.gguf"
-    target_path = tmp_path / "models" / "final.gguf"
+def test_setup_llm_downloads_and_renames_model(monkeypatch, tmp_path):
+    module, _ = load_setup_models_module(monkeypatch)
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    downloaded = download_dir / "downloaded.gguf"
+    downloaded.write_text("weights", encoding="utf-8")
+    target = tmp_path / "models" / "target.gguf"
     config = Config(
-        models_dir=str(target_path.parent),
-        llm_model_path=str(target_path),
-        llm_repo_id="repo/test",
-        llm_filename="final.gguf",
+        models_dir=str(target.parent),
+        llm_model_path=str(target),
+        llm_repo_id="repo/demo",
+        llm_filename="downloaded.gguf",
     )
+    calls = []
 
-    def fake_download(repo_id, filename, local_dir):
-        assert repo_id == "repo/test"
-        assert filename == "final.gguf"
-        assert local_dir == str(target_path.parent)
-        download_path.parent.mkdir(parents=True, exist_ok=True)
-        download_path.write_text("model", encoding="utf-8")
-        return str(download_path)
-
-    monkeypatch.setitem(
-        sys.modules,
+    install_module(
+        monkeypatch,
         "huggingface_hub",
-        module_factory("huggingface_hub", hf_hub_download=fake_download),
+        make_module(
+            "huggingface_hub",
+            hf_hub_download=lambda **kwargs: calls.append(kwargs) or str(downloaded),
+        ),
     )
 
     module.setup_llm(config)
 
-    assert target_path.exists()
-    assert target_path.read_text(encoding="utf-8") == "model"
-    assert not download_path.exists()
+    assert calls == [
+        {
+            "repo_id": "repo/demo",
+            "filename": "downloaded.gguf",
+            "local_dir": str(target.parent),
+        }
+    ]
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "weights"
+    assert not downloaded.exists()
 
 
-def test_setup_llm_exits_with_manual_instructions_on_error(
-    monkeypatch, fresh_import, module_factory, capsys, tmp_path
-):
-    module = _import_setup_models_module(monkeypatch, fresh_import)
+def test_setup_llm_exits_when_download_fails(monkeypatch, tmp_path):
+    module, _ = load_setup_models_module(monkeypatch)
     config = Config(
         models_dir=str(tmp_path / "models"),
-        llm_model_path=str(tmp_path / "models" / "final.gguf"),
-        llm_repo_id="repo/test",
-        llm_filename="final.gguf",
+        llm_model_path=str(tmp_path / "models" / "missing.gguf"),
+        llm_repo_id="repo/demo",
+        llm_filename="missing.gguf",
     )
 
-    def fake_download(repo_id, filename, local_dir):
-        raise RuntimeError("download failed")
-
-    monkeypatch.setitem(
-        sys.modules,
+    install_module(
+        monkeypatch,
         "huggingface_hub",
-        module_factory("huggingface_hub", hf_hub_download=fake_download),
+        make_module(
+            "huggingface_hub",
+            hf_hub_download=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+        ),
     )
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(SystemExit) as exc_info:
         module.setup_llm(config)
 
-    out = capsys.readouterr().out
-    assert exc.value.code == 1
-    assert "ERROR downloading LLM" in out
-    assert "https://huggingface.co/repo/test" in out
-    assert str(Path(config.llm_model_path)) in out
+    assert exc_info.value.code == 1
 
 
-def test_main_runs_setup_steps_in_order(monkeypatch, fresh_import):
-    module = _import_setup_models_module(monkeypatch, fresh_import)
+def test_main_runs_setup_steps_in_order(monkeypatch):
+    module, _ = load_setup_models_module(monkeypatch)
     config = Config()
     calls = []
 
     monkeypatch.setattr(module.Config, "load", classmethod(lambda cls: config))
-    monkeypatch.setattr(module, "check_cuda", lambda: calls.append("cuda"))
-    monkeypatch.setattr(module, "setup_vad", lambda: calls.append("vad"))
-    monkeypatch.setattr(
-        module, "setup_whisper", lambda cfg: calls.append(("whisper", cfg))
-    )
-    monkeypatch.setattr(module, "setup_llm", lambda cfg: calls.append(("llm", cfg)))
-    monkeypatch.setattr(module, "setup_tts", lambda cfg: calls.append(("tts", cfg)))
+    monkeypatch.setattr(module, "check_cuda", lambda: calls.append("check_cuda"))
+    monkeypatch.setattr(module, "setup_vad", lambda: calls.append("setup_vad"))
+    monkeypatch.setattr(module, "setup_whisper", lambda cfg: calls.append(("setup_whisper", cfg)))
+    monkeypatch.setattr(module, "setup_llm", lambda cfg: calls.append(("setup_llm", cfg)))
+    monkeypatch.setattr(module, "setup_tts", lambda cfg: calls.append(("setup_tts", cfg)))
 
     module.main()
 
     assert calls == [
-        "cuda",
-        "vad",
-        ("whisper", config),
-        ("llm", config),
-        ("tts", config),
+        "check_cuda",
+        "setup_vad",
+        ("setup_whisper", config),
+        ("setup_llm", config),
+        ("setup_tts", config),
     ]

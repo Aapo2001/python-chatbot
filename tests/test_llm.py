@@ -1,119 +1,120 @@
-from types import SimpleNamespace
-
 from voice_chatbot.config import Config
 
+from .conftest import import_fresh, install_module, make_module
 
-def _build_llm_module(fresh_import, module_factory):
-    state = {"responses": []}
 
-    class FakeLlama:
-        def __init__(self, **kwargs):
-            state["init_kwargs"] = kwargs
+class FakeLlama:
+    init_calls = []
+    responses = []
 
-        def create_chat_completion(self, **kwargs):
-            state.setdefault("calls", []).append(kwargs)
-            content = state["responses"].pop(0)
-            return {"choices": [{"message": {"content": content}}]}
+    def __init__(self, **kwargs):
+        type(self).init_calls.append(kwargs)
+        self.calls = []
+        type(self).instance = self
 
-    llama_types = module_factory(
+    def create_chat_completion(self, **kwargs):
+        self.calls.append(kwargs)
+        content = type(self).responses.pop(0)
+        return {"choices": [{"message": {"content": content}}]}
+
+
+def load_llm_module(monkeypatch):
+    FakeLlama.init_calls = []
+    FakeLlama.responses = []
+    install_module(monkeypatch, "llama_cpp", make_module("llama_cpp", Llama=FakeLlama))
+    install_module(
+        monkeypatch,
         "llama_cpp.llama_types",
-        ChatCompletionRequestAssistantMessage=dict,
-        ChatCompletionRequestMessage=dict,
-        ChatCompletionRequestSystemMessage=dict,
-        ChatCompletionRequestUserMessage=dict,
-        CreateChatCompletionResponse=dict,
+        make_module(
+            "llama_cpp.llama_types",
+            ChatCompletionRequestAssistantMessage=dict,
+            ChatCompletionRequestMessage=dict,
+            ChatCompletionRequestSystemMessage=dict,
+            ChatCompletionRequestUserMessage=dict,
+            CreateChatCompletionResponse=dict,
+        ),
     )
-    llama_cpp = module_factory(
-        "llama_cpp",
-        Llama=FakeLlama,
-        llama_types=llama_types,
-    )
-
-    module = fresh_import(
-        "voice_chatbot.llm",
-        stub_modules={
-            "llama_cpp": llama_cpp,
-            "llama_cpp.llama_types": llama_types,
-        },
-        clear_modules=["voice_chatbot.llm"],
-    )
-    return module, state
+    return import_fresh("voice_chatbot.llm")
 
 
-def test_chat_passes_system_prompt_and_generation_options(fresh_import, module_factory):
-    module, state = _build_llm_module(fresh_import, module_factory)
-    state["responses"] = ["terve"]
-    config = Config(
-        llm_model_path="models/test.gguf",
-        llm_n_gpu_layers=12,
-        llm_n_ctx=4096,
-        llm_max_tokens=128,
-        llm_temperature=0.2,
-        llm_system_prompt="system",
-    )
+def test_initialization_passes_expected_model_settings(monkeypatch):
+    module = load_llm_module(monkeypatch)
+    config = Config(llm_model_path="models/model.gguf", llm_n_gpu_layers=7, llm_n_ctx=4096)
 
-    llm = module.ChatLLM(config)
-    reply = llm.chat("hei")
+    module.ChatLLM(config)
 
-    assert reply == "terve"
-    assert state["init_kwargs"] == {
-        "model_path": "models/test.gguf",
-        "n_gpu_layers": 12,
-        "n_ctx": 4096,
-        "verbose": False,
-    }
-
-    call = state["calls"][0]
-    assert call["max_tokens"] == 128
-    assert call["temperature"] == 0.2
-    assert call["stream"] is False
-    assert call["messages"] == [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "hei"},
+    assert FakeLlama.init_calls == [
+        {
+            "model_path": "models/model.gguf",
+            "n_gpu_layers": 7,
+            "n_ctx": 4096,
+            "verbose": False,
+        }
     ]
 
 
-def test_chat_trims_to_recent_complete_turns(fresh_import, module_factory):
-    module, state = _build_llm_module(fresh_import, module_factory)
-    state["responses"] = ["v1", "v2", "v3"]
-    llm = module.ChatLLM(Config(max_conversation_turns=2, llm_system_prompt="sys"))
+def test_chat_sends_system_prompt_and_persists_turn(monkeypatch):
+    module = load_llm_module(monkeypatch)
+    FakeLlama.responses = ["Moi!"]
+    chat = module.ChatLLM(Config(llm_system_prompt="system prompt"))
 
-    llm.chat("u1")
-    llm.chat("u2")
-    llm.chat("u3")
+    reply = chat.chat("Hei")
 
-    third_call_messages = state["calls"][-1]["messages"]
-    assert third_call_messages == [
-        {"role": "system", "content": "sys"},
-        {"role": "user", "content": "u2"},
-        {"role": "assistant", "content": "v2"},
-        {"role": "user", "content": "u3"},
+    assert reply == "Moi!"
+    messages = FakeLlama.instance.calls[0]["messages"]
+    assert messages == [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Hei"},
     ]
-    assert llm._conversation_history == [
-        {"role": "user", "content": "u2"},
-        {"role": "assistant", "content": "v2"},
-        {"role": "user", "content": "u3"},
-        {"role": "assistant", "content": "v3"},
+    assert chat._conversation_history == [
+        {"role": "user", "content": "Hei"},
+        {"role": "assistant", "content": "Moi!"},
     ]
 
 
-def test_empty_response_does_not_append_assistant_message(fresh_import, module_factory):
-    module, state = _build_llm_module(fresh_import, module_factory)
-    state["responses"] = [None]
-    llm = module.ChatLLM(Config())
+def test_chat_returns_empty_string_without_mutating_history(monkeypatch):
+    module = load_llm_module(monkeypatch)
+    FakeLlama.responses = [""]
+    chat = module.ChatLLM(Config())
 
-    reply = llm.chat("hei")
+    reply = chat.chat("Hei")
 
     assert reply == ""
-    assert llm._conversation_history == [{"role": "user", "content": "hei"}]
+    assert chat._conversation_history == []
 
 
-def test_clear_history_removes_all_messages(fresh_import, module_factory):
-    module, state = _build_llm_module(fresh_import, module_factory)
-    state["responses"] = ["vastaus"]
-    llm = module.ChatLLM(Config())
-    llm.chat("hei")
+def test_chat_trims_history_to_complete_turns(monkeypatch):
+    module = load_llm_module(monkeypatch)
+    FakeLlama.responses = ["A1", "A2", "A3"]
+    chat = module.ChatLLM(Config(llm_system_prompt="sys", max_conversation_turns=2))
 
-    llm.clear_history()
+    assert chat.chat("U1") == "A1"
+    assert chat.chat("U2") == "A2"
+    assert chat.chat("U3") == "A3"
 
-    assert llm._conversation_history == []
+    third_call_messages = FakeLlama.instance.calls[2]["messages"]
+    assert third_call_messages == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "U1"},
+        {"role": "assistant", "content": "A1"},
+        {"role": "user", "content": "U2"},
+        {"role": "assistant", "content": "A2"},
+        {"role": "user", "content": "U3"},
+    ]
+    assert chat._conversation_history == [
+        {"role": "user", "content": "U2"},
+        {"role": "assistant", "content": "A2"},
+        {"role": "user", "content": "U3"},
+        {"role": "assistant", "content": "A3"},
+    ]
+
+
+def test_clear_history_removes_all_turns(monkeypatch):
+    module = load_llm_module(monkeypatch)
+    FakeLlama.responses = ["A1"]
+    chat = module.ChatLLM(Config())
+    chat.chat("U1")
+
+    chat.clear_history()
+
+    assert chat._conversation_history == []

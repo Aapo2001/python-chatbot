@@ -1,117 +1,129 @@
-from collections import deque
-
 import numpy as np
 
 from voice_chatbot.config import Config
 
+from .conftest import import_fresh, install_module, make_module
 
-def _build_vad_module(fresh_import, module_factory):
-    state = {}
 
-    class FakeVADIterator:
-        def __init__(self, model, **kwargs):
-            self.model = model
-            self.kwargs = kwargs
-            self.responses = deque()
-            self.calls = []
-            self.reset_calls = 0
-            state["iterator"] = self
+class FakeVADIterator:
+    init_calls = []
+    queued_responses = []
 
-        def __call__(self, tensor, return_seconds=False):
-            self.calls.append((tensor.copy(), return_seconds))
-            if self.responses:
-                return self.responses.popleft()
-            return None
+    def __init__(self, model, **kwargs):
+        type(self).init_calls.append({"model": model, **kwargs})
+        self.calls = []
+        self.reset_called = False
+        type(self).instance = self
 
-        def reset_states(self):
-            self.reset_calls += 1
+    def __call__(self, tensor, return_seconds=False):
+        self.calls.append({"tensor": tensor, "return_seconds": return_seconds})
+        if type(self).queued_responses:
+            return type(self).queued_responses.pop(0)
+        return None
 
-    torch_module = module_factory("torch", from_numpy=lambda arr: arr)
-    silero_vad = module_factory(
+    def reset_states(self):
+        self.reset_called = True
+
+
+def load_vad_module(monkeypatch):
+    FakeVADIterator.init_calls = []
+    FakeVADIterator.queued_responses = []
+    install_module(monkeypatch, "torch", make_module("torch", from_numpy=lambda array: array))
+    install_module(
+        monkeypatch,
         "silero_vad",
-        load_silero_vad=lambda: "vad-model",
-        VADIterator=FakeVADIterator,
+        make_module(
+            "silero_vad",
+            load_silero_vad=lambda: "model",
+            VADIterator=FakeVADIterator,
+        ),
     )
-    module = fresh_import(
-        "voice_chatbot.vad",
-        stub_modules={
-            "torch": torch_module,
-            "silero_vad": silero_vad,
-        },
-        clear_modules=["voice_chatbot.vad"],
+    return import_fresh("voice_chatbot.vad")
+
+
+def test_silence_below_energy_floor_is_buffered_without_hitting_vad(monkeypatch):
+    module = load_vad_module(monkeypatch)
+    vad = module.VoiceActivityDetector(Config(sample_rate=1000, chunk_samples=4))
+    silent_chunk = np.zeros(4, dtype=np.int16)
+
+    event, audio = vad.process_chunk(silent_chunk)
+
+    assert (event, audio) == (None, None)
+    assert len(FakeVADIterator.instance.calls) == 0
+    assert len(vad._pre_buffer) == 1
+
+
+def test_speech_start_prepends_prebuffer(monkeypatch):
+    module = load_vad_module(monkeypatch)
+    vad = module.VoiceActivityDetector(
+        Config(sample_rate=1000, chunk_samples=4, vad_pre_buffer_ms=8)
     )
-    return module, state
+    prebuffer_chunk = np.full(4, 200, dtype=np.int16)
+    start_chunk = np.full(4, 300, dtype=np.int16)
+
+    assert vad.process_chunk(prebuffer_chunk) == (None, None)
+    FakeVADIterator.queued_responses = [{"start": 0}]
+
+    event, audio = vad.process_chunk(start_chunk)
+
+    assert (event, audio) == ("speech_start", None)
+    assert len(vad._audio_buffer) == 2
+    assert np.array_equal(vad._audio_buffer[0], prebuffer_chunk)
+    assert np.array_equal(vad._audio_buffer[1], start_chunk)
 
 
-def test_vad_uses_energy_gate_before_speech_start(fresh_import, module_factory):
-    module, state = _build_vad_module(fresh_import, module_factory)
-    detector = module.VoiceActivityDetector(Config())
-    quiet_chunk = np.zeros(512, dtype=np.int16)
-
-    event, audio = detector.process_chunk(quiet_chunk)
-
-    assert event is None
-    assert audio is None
-    assert state["iterator"].calls == []
-    assert len(detector._pre_buffer) == 1
-
-
-def test_vad_returns_concatenated_audio_with_prebuffer(fresh_import, module_factory):
-    module, state = _build_vad_module(fresh_import, module_factory)
-    config = Config(
-        sample_rate=1000,
-        chunk_samples=5,
-        min_speech_duration_ms=10,
-        vad_pre_buffer_ms=5,
+def test_speech_end_returns_concatenated_audio(monkeypatch):
+    module = load_vad_module(monkeypatch)
+    vad = module.VoiceActivityDetector(
+        Config(
+            sample_rate=1000,
+            chunk_samples=4,
+            min_speech_duration_ms=1,
+            vad_pre_buffer_ms=8,
+        )
     )
-    detector = module.VoiceActivityDetector(config)
-    state["iterator"].responses.extend([None, {"start": 5}, {"end": 15}])
+    leading = np.full(4, 200, dtype=np.int16)
+    start_chunk = np.full(4, 300, dtype=np.int16)
+    end_chunk = np.full(4, 400, dtype=np.int16)
 
-    prebuffer = np.array([100, 100, 100, 100, 100], dtype=np.int16)
-    start_chunk = np.array([200, 200, 200, 200, 200], dtype=np.int16)
-    end_chunk = np.array([300, 300, 300, 300, 300], dtype=np.int16)
+    assert vad.process_chunk(leading) == (None, None)
+    FakeVADIterator.queued_responses = [{"start": 0}]
+    assert vad.process_chunk(start_chunk) == ("speech_start", None)
+    FakeVADIterator.queued_responses = [{"end": 4}]
 
-    assert detector.process_chunk(prebuffer) == (None, None)
-    assert detector.process_chunk(start_chunk) == ("speech_start", None)
-    event, audio = detector.process_chunk(end_chunk)
+    event, audio = vad.process_chunk(end_chunk)
 
     assert event == "speech_end"
-    assert np.array_equal(audio, np.concatenate([prebuffer, start_chunk, end_chunk]))
+    assert np.array_equal(audio, np.concatenate([leading, start_chunk, end_chunk]))
+    assert vad._audio_buffer == []
+    assert len(vad._pre_buffer) == 0
 
 
-def test_vad_drops_short_utterances(fresh_import, module_factory):
-    module, state = _build_vad_module(fresh_import, module_factory)
-    config = Config(
-        sample_rate=1000,
-        chunk_samples=5,
-        min_speech_duration_ms=30,
-        vad_pre_buffer_ms=5,
+def test_short_utterance_is_discarded(monkeypatch):
+    module = load_vad_module(monkeypatch)
+    vad = module.VoiceActivityDetector(
+        Config(sample_rate=1000, chunk_samples=4, min_speech_duration_ms=50)
     )
-    detector = module.VoiceActivityDetector(config)
-    state["iterator"].responses.extend([{"start": 5}, {"end": 10}])
+    start_chunk = np.full(4, 300, dtype=np.int16)
+    end_chunk = np.full(4, 300, dtype=np.int16)
 
-    assert detector.process_chunk(np.full(5, 150, dtype=np.int16)) == (
-        "speech_start",
-        None,
-    )
-    event, audio = detector.process_chunk(np.full(5, 150, dtype=np.int16))
+    FakeVADIterator.queued_responses = [{"start": 0}]
+    assert vad.process_chunk(start_chunk) == ("speech_start", None)
+    FakeVADIterator.queued_responses = [{"end": 4}]
 
-    assert event is None
-    assert audio is None
-    assert detector._is_speech is False
-    assert detector._audio_buffer == []
+    assert vad.process_chunk(end_chunk) == (None, None)
 
 
-def test_vad_reset_clears_state_and_resets_iterator(fresh_import, module_factory):
-    module, state = _build_vad_module(fresh_import, module_factory)
-    detector = module.VoiceActivityDetector(Config())
-    detector._is_speech = True
-    detector._audio_buffer = [np.array([1, 2], dtype=np.int16)]
-    detector._pre_buffer.append(np.array([3, 4], dtype=np.int16))
+def test_reset_clears_state_and_resets_iterator(monkeypatch):
+    module = load_vad_module(monkeypatch)
+    vad = module.VoiceActivityDetector(Config())
+    vad._audio_buffer = [np.array([1], dtype=np.int16)]
+    vad._pre_buffer.append(np.array([2], dtype=np.int16))
+    vad._is_speech = True
 
-    detector.reset()
+    vad.reset()
 
-    assert detector._is_speech is False
-    assert detector._audio_buffer == []
-    assert len(detector._pre_buffer) == 0
-    assert state["iterator"].reset_calls == 1
+    assert vad._audio_buffer == []
+    assert list(vad._pre_buffer) == []
+    assert vad._is_speech is False
+    assert FakeVADIterator.instance.reset_called is True

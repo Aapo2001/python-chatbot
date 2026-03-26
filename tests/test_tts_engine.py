@@ -1,123 +1,102 @@
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 
-import voice_chatbot.platform_setup as platform_setup
 from voice_chatbot.config import Config
 
+from .conftest import import_fresh, install_module, make_module
 
-def _build_tts_module(
-    monkeypatch,
-    fresh_import,
-    module_factory,
-    *,
-    cuda_available=True,
-    synthesizer=SimpleNamespace(output_sample_rate=22050),
-):
-    monkeypatch.setattr(platform_setup, "setup_espeak", lambda: None)
-    state = {}
 
-    class FakeRuntimeTTS:
-        def __init__(self, **kwargs):
-            state["init_kwargs"] = kwargs
-            self.synthesizer = synthesizer
+class FakeTTSModel:
+    init_calls = []
 
-        def to(self, device):
-            state["device"] = device
-            return self
+    def __init__(self, **kwargs):
+        type(self).init_calls.append(kwargs)
+        self.to_calls = []
+        self.synthesizer = make_module("synth", output_sample_rate=22050)
+        type(self).instance = self
 
-        def tts(self, text):
-            state["text"] = text
-            return [0.25, -0.5]
+    def to(self, device):
+        self.to_calls.append(device)
+        return self
 
-    torch_module = module_factory(
+    def tts(self, text):
+        self.last_text = text
+        return [0.1, -0.2, 0.3]
+
+
+def load_tts_module(monkeypatch, cuda_available=False):
+    calls = {"setup_espeak": 0}
+    FakeTTSModel.init_calls = []
+    install_module(
+        monkeypatch,
+        "voice_chatbot.platform_setup",
+        make_module(
+            "voice_chatbot.platform_setup",
+            setup_espeak=lambda: calls.__setitem__("setup_espeak", calls["setup_espeak"] + 1),
+        ),
+    )
+    install_module(
+        monkeypatch,
         "torch",
-        cuda=SimpleNamespace(is_available=lambda: cuda_available),
-        device=lambda name: f"device:{name}",
+        make_module(
+            "torch",
+            device=lambda name: f"device:{name}",
+            cuda=make_module("torch.cuda", is_available=lambda: cuda_available),
+        ),
     )
-    tts_api = module_factory("TTS.api", TTS=FakeRuntimeTTS)
-    tts_package = module_factory("TTS", api=tts_api)
-
-    module = fresh_import(
-        "voice_chatbot.tts_engine",
-        stub_modules={
-            "torch": torch_module,
-            "TTS": tts_package,
-            "TTS.api": tts_api,
-        },
-        clear_modules=["voice_chatbot.tts_engine"],
-    )
-    return module, state
+    install_module(monkeypatch, "TTS", make_module("TTS"))
+    install_module(monkeypatch, "TTS.api", make_module("TTS.api", TTS=FakeTTSModel))
+    return import_fresh("voice_chatbot.tts_engine"), calls
 
 
-def test_tts_prefers_local_model_files(
-    monkeypatch, fresh_import, module_factory, tmp_path
-):
-    module, state = _build_tts_module(monkeypatch, fresh_import, module_factory)
+def test_local_model_path_is_preferred_when_files_exist(monkeypatch, tmp_path):
+    module, calls = load_tts_module(monkeypatch, cuda_available=True)
     model_path = tmp_path / "model.pth"
     config_path = tmp_path / "config.json"
-    model_path.write_text("weights", encoding="utf-8")
+    model_path.write_text("model", encoding="utf-8")
     config_path.write_text("{}", encoding="utf-8")
-    config = Config(
-        tts_model_path=str(model_path),
-        tts_config_path=str(config_path),
-        tts_gpu=True,
+
+    tts = module.TextToSpeech(
+        Config(
+            tts_model="zoo-model",
+            tts_model_path=str(model_path),
+            tts_config_path=str(config_path),
+            tts_gpu=True,
+        )
     )
 
-    tts = module.TextToSpeech(config)
-
-    assert state["init_kwargs"] == {
-        "model_path": str(model_path),
-        "config_path": str(config_path),
-    }
-    assert state["device"] == "device:cuda"
+    assert calls["setup_espeak"] == 1
+    assert FakeTTSModel.init_calls == [
+        {"model_path": str(model_path), "config_path": str(config_path)}
+    ]
+    assert FakeTTSModel.instance.to_calls == ["device:cuda"]
     assert tts._sample_rate == 22050
 
 
-def test_tts_falls_back_to_model_name_when_local_files_are_missing(
-    monkeypatch, fresh_import, module_factory, tmp_path
-):
-    module, state = _build_tts_module(
-        monkeypatch,
-        fresh_import,
-        module_factory,
-        cuda_available=False,
-    )
-    config = Config(
-        tts_model="tts_models/custom",
-        tts_model_path=str(tmp_path / "missing-model.pth"),
-        tts_config_path=str(tmp_path / "missing-config.json"),
-        tts_gpu=True,
-    )
+def test_model_zoo_branch_is_used_when_local_files_are_missing(monkeypatch):
+    module, _ = load_tts_module(monkeypatch, cuda_available=False)
 
-    module.TextToSpeech(config)
+    tts = module.TextToSpeech(Config(tts_model="tts_models/demo", tts_gpu=True))
 
-    assert state["init_kwargs"] == {"model_name": "tts_models/custom"}
-    assert state["device"] == "device:cpu"
+    assert FakeTTSModel.init_calls == [{"model_name": "tts_models/demo"}]
+    assert FakeTTSModel.instance.to_calls == ["device:cpu"]
+    audio, sample_rate = tts.synthesize("Hei maailma")
+    assert sample_rate == 22050
+    assert audio.dtype == np.float32
+    assert np.allclose(audio, np.array([0.1, -0.2, 0.3], dtype=np.float32))
+    assert FakeTTSModel.instance.last_text == "Hei maailma"
 
 
-def test_tts_raises_if_synthesizer_is_missing(
-    monkeypatch, fresh_import, module_factory
-):
-    module, _ = _build_tts_module(
-        monkeypatch,
-        fresh_import,
-        module_factory,
-        synthesizer=None,
-    )
+def test_missing_synthesizer_raises_runtime_error(monkeypatch):
+    load_tts_module(monkeypatch)
+
+    class BrokenTTS(FakeTTSModel):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.synthesizer = None
+
+    install_module(monkeypatch, "TTS.api", make_module("TTS.api", TTS=BrokenTTS))
+    module = import_fresh("voice_chatbot.tts_engine")
 
     with pytest.raises(RuntimeError, match="synthesizer"):
         module.TextToSpeech(Config())
-
-
-def test_synthesize_returns_float32_audio(monkeypatch, fresh_import, module_factory):
-    module, state = _build_tts_module(monkeypatch, fresh_import, module_factory)
-    tts = module.TextToSpeech(Config())
-
-    audio, sample_rate = tts.synthesize("hei maailma")
-
-    assert state["text"] == "hei maailma"
-    assert audio.dtype == np.float32
-    assert np.allclose(audio, np.array([0.25, -0.5], dtype=np.float32))
-    assert sample_rate == 22050

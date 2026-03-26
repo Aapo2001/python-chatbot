@@ -1,60 +1,68 @@
-from types import SimpleNamespace
-
 import numpy as np
 
 from voice_chatbot.config import Config
 
+from .conftest import import_fresh, install_module, make_module
 
-def _build_stt_module(fresh_import, module_factory):
-    state = {}
 
-    class Segment:
-        def __init__(self, text):
-            self.text = text
+class Segment:
+    def __init__(self, text):
+        self.text = text
 
-    class FakeWhisperModel:
-        def __init__(self, model_name, device, cpu_threads):
-            state["init"] = {
+
+class FakeWhisperModel:
+    init_calls = []
+    segments = []
+
+    def __init__(self, model_name, device, cpu_threads):
+        type(self).init_calls.append(
+            {
                 "model_name": model_name,
                 "device": device,
                 "cpu_threads": cpu_threads,
             }
+        )
+        self.transcribe_calls = []
+        type(self).instance = self
 
-        def transcribe(self, audio, language):
-            state["audio"] = audio.copy()
-            state["language"] = language
-            return [Segment(" Hei"), Segment(" maailma ")], {"language": language}
+    def transcribe(self, audio, language):
+        self.transcribe_calls.append({"audio": audio, "language": language})
+        return type(self).segments, {"ignored": True}
 
-    faster_whisper = module_factory("faster_whisper", WhisperModel=FakeWhisperModel)
-    module = fresh_import(
-        "voice_chatbot.stt",
-        stub_modules={"faster_whisper": faster_whisper},
-        clear_modules=["voice_chatbot.stt"],
+
+def load_stt_module(monkeypatch):
+    FakeWhisperModel.init_calls = []
+    FakeWhisperModel.segments = []
+    install_module(
+        monkeypatch,
+        "faster_whisper",
+        make_module("faster_whisper", WhisperModel=FakeWhisperModel),
     )
-    return module, state
+    return import_fresh("voice_chatbot.stt")
 
 
-def test_stt_initializes_model_with_requested_device(fresh_import, module_factory):
-    module, state = _build_stt_module(fresh_import, module_factory)
-    config = Config(whisper_model="small", whisper_gpu=False, whisper_n_threads=6)
+def test_initialization_uses_cuda_when_enabled(monkeypatch):
+    module = load_stt_module(monkeypatch)
 
-    module.SpeechToText(config)
+    module.SpeechToText(
+        Config(language="en", whisper_model="small", whisper_gpu=True, whisper_n_threads=8)
+    )
 
-    assert state["init"] == {
-        "model_name": "small",
-        "device": "cpu",
-        "cpu_threads": 6,
-    }
+    assert FakeWhisperModel.init_calls == [
+        {"model_name": "small", "device": "cuda", "cpu_threads": 8}
+    ]
 
 
-def test_transcribe_normalizes_audio_and_joins_segments(fresh_import, module_factory):
-    module, state = _build_stt_module(fresh_import, module_factory)
-    stt = module.SpeechToText(Config(language="en"))
+def test_transcribe_normalizes_audio_and_joins_segments(monkeypatch):
+    module = load_stt_module(monkeypatch)
+    FakeWhisperModel.segments = [Segment("  hello"), Segment("world  ")]
+    stt = module.SpeechToText(Config(language="en", whisper_gpu=False))
     audio = np.array([0, 16384, -32768], dtype=np.int16)
 
     text = stt.transcribe(audio)
 
-    assert state["language"] == "en"
-    assert state["audio"].dtype == np.float32
-    assert np.allclose(state["audio"], np.array([0.0, 0.5, -1.0], dtype=np.float32))
-    assert text == "Hei  maailma"
+    call = FakeWhisperModel.instance.transcribe_calls[0]
+    assert np.allclose(call["audio"], np.array([0.0, 0.5, -1.0], dtype=np.float32))
+    assert call["audio"].dtype == np.float32
+    assert call["language"] == "en"
+    assert text == "hello world"
