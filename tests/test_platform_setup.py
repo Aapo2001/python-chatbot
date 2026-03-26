@@ -5,21 +5,27 @@ from voice_chatbot import platform_setup
 
 def test_setup_cuda_adds_existing_cuda_directories(monkeypatch):
     added = []
+    cuda_root = r"C:\CUDA"
+    cuda_bin_x64 = os.path.join(cuda_root, "bin/x64")
+    cuda_bin = os.path.join(cuda_root, "bin")
     monkeypatch.setattr(
-        platform_setup.os, "add_dll_directory", lambda path: added.append(path), raising=False
+        platform_setup.os,
+        "add_dll_directory",
+        lambda path: added.append(path),
+        raising=False,
     )
-    monkeypatch.setenv("CUDA_PATH", r"C:\CUDA")
+    monkeypatch.setenv("CUDA_PATH", cuda_root)
     monkeypatch.setenv("PATH", "tail")
     monkeypatch.setattr(
         platform_setup.os.path,
         "isdir",
-        lambda path: path in {r"C:\CUDA\bin/x64", r"C:\CUDA\bin"},
+        lambda path: path in {cuda_bin_x64, cuda_bin},
     )
 
     platform_setup.setup_cuda()
 
-    assert added == [r"C:\CUDA\bin/x64", r"C:\CUDA\bin"]
-    assert os.environ["PATH"].startswith(r"C:\CUDA\bin" + os.pathsep)
+    assert added == [cuda_bin_x64, cuda_bin]
+    assert os.environ["PATH"].startswith(cuda_bin + os.pathsep)
 
 
 def test_setup_pyside6_updates_qt_plugin_paths(monkeypatch, tmp_path):
@@ -30,7 +36,10 @@ def test_setup_pyside6_updates_qt_plugin_paths(monkeypatch, tmp_path):
     (site_packages / "shiboken6").mkdir(parents=True)
 
     monkeypatch.setattr(
-        platform_setup.os, "add_dll_directory", lambda path: added.append(path), raising=False
+        platform_setup.os,
+        "add_dll_directory",
+        lambda path: added.append(path),
+        raising=False,
     )
     monkeypatch.setattr(platform_setup.sys, "path", [str(site_packages)])
     monkeypatch.setenv("PATH", "tail")
