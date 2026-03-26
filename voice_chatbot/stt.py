@@ -14,7 +14,6 @@ Usage::
 import inspect
 
 import numpy as np
-import torch
 from faster_whisper import WhisperModel
 
 from .config import Config
@@ -33,7 +32,7 @@ class SpeechToText:
 
     def __init__(self, config: Config):
         self._language = config.language
-        use_gpu = config.whisper_gpu and torch.cuda.is_available()
+        use_gpu = config.whisper_gpu
         device = "cuda" if use_gpu else "cpu"
         compute_type = "float16" if use_gpu else "int8"
         print(
