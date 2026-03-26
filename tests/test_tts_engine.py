@@ -73,10 +73,19 @@ def test_local_model_path_is_preferred_when_files_exist(monkeypatch, tmp_path):
     assert tts._sample_rate == 22050
 
 
-def test_model_zoo_branch_is_used_when_local_files_are_missing(monkeypatch):
+def test_model_zoo_branch_is_used_when_local_files_are_missing(monkeypatch, tmp_path):
     module, _ = load_tts_module(monkeypatch, cuda_available=False)
+    missing_model = tmp_path / "missing-model.pth"
+    missing_config = tmp_path / "missing-config.json"
 
-    tts = module.TextToSpeech(Config(tts_model="tts_models/demo", tts_gpu=True))
+    tts = module.TextToSpeech(
+        Config(
+            tts_model="tts_models/demo",
+            tts_model_path=str(missing_model),
+            tts_config_path=str(missing_config),
+            tts_gpu=True,
+        )
+    )
 
     assert FakeTTSModel.init_calls == [{"model_name": "tts_models/demo"}]
     assert FakeTTSModel.instance.to_calls == ["device:cpu"]
