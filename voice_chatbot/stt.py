@@ -11,7 +11,10 @@ Usage::
     text = stt.transcribe(audio_int16)
 """
 
+import inspect
+
 import numpy as np
+import torch
 from faster_whisper import WhisperModel
 
 from .config import Config
@@ -30,15 +33,20 @@ class SpeechToText:
 
     def __init__(self, config: Config):
         self._language = config.language
-        device = "cuda" if config.whisper_gpu else "cpu"
+        use_gpu = config.whisper_gpu and torch.cuda.is_available()
+        device = "cuda" if use_gpu else "cpu"
+        compute_type = "float16" if use_gpu else "int8"
         print(
-            f"[STT] Loading Whisper model '{config.whisper_model}' on {device} (language: {self._language})..."
+            f"[STT] Loading Whisper model '{config.whisper_model}' on {device} "
+            f"(compute_type: {compute_type}, language: {self._language})..."
         )
-        self._model = WhisperModel(
-            config.whisper_model,
-            device=device,
-            cpu_threads=config.whisper_n_threads,
-        )
+        model_kwargs = {
+            "device": device,
+            "cpu_threads": config.whisper_n_threads,
+        }
+        if "compute_type" in inspect.signature(WhisperModel).parameters:
+            model_kwargs["compute_type"] = compute_type
+        self._model = WhisperModel(config.whisper_model, **model_kwargs)
         print("[STT] Whisper model loaded.")
 
     def transcribe(self, audio_int16: np.ndarray) -> str:

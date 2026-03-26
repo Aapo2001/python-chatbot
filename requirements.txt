@@ -1,6 +1,7 @@
 coqui-tts[codec]
 transformers>=4.57,<5.0
 silero-vad
+faster-whisper
 sounddevice
 numpy
 huggingface-hub

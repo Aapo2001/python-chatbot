@@ -14,8 +14,8 @@ export CMAKE_ARGS="${CMAKE_ARGS:--DGGML_CUDA=on}"
 echo "[pixi] Installing llama-cpp-python..."
 python -m pip install --upgrade --force-reinstall llama-cpp-python --no-cache-dir
 
-echo "[pixi] Installing pywhispercpp..."
-python -m pip install --upgrade --force-reinstall pywhispercpp --no-cache-dir
+echo "[pixi] Installing faster-whisper..."
+python -m pip install --upgrade --force-reinstall faster-whisper --no-cache-dir
 
 echo "[pixi] Installing remaining project requirements..."
 python -m pip uninstall -y PySide6 PySide6_Addons PySide6_Essentials shiboken6 >/dev/null 2>&1 || true

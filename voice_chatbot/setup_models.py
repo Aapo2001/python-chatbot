@@ -9,6 +9,7 @@ Usage::
     # or: python -m voice_chatbot.setup_models
 """
 
+import inspect
 import os
 import sys
 from pathlib import Path
@@ -40,11 +41,24 @@ def setup_whisper(config: Config) -> None:
     """Load the configured Whisper model to warm up the cache."""
     print(f"\nSetting up Whisper model '{config.whisper_model}'...")
     try:
-        from pywhispercpp.model import Model
+        import torch
+        from faster_whisper import WhisperModel
 
-        model = Model(config.whisper_model)
-        print(f"  Whisper model '{config.whisper_model}' is ready.")
+        use_gpu = config.whisper_gpu and torch.cuda.is_available()
+        device = "cuda" if use_gpu else "cpu"
+        compute_type = "float16" if use_gpu else "int8"
+        model_kwargs = {
+            "device": device,
+            "cpu_threads": config.whisper_n_threads,
+        }
+        if "compute_type" in inspect.signature(WhisperModel).parameters:
+            model_kwargs["compute_type"] = compute_type
+        model = WhisperModel(config.whisper_model, **model_kwargs)
         del model
+        print(
+            f"  Whisper model '{config.whisper_model}' is ready on {device} "
+            f"(compute_type: {compute_type})."
+        )
     except Exception as e:
         print(f"  ERROR setting up Whisper: {e}")
         sys.exit(1)
@@ -86,13 +100,25 @@ def setup_llm(config: Config) -> None:
 
 
 def setup_tts(config: Config) -> None:
-    """Load the configured Coqui TTS model (CPU-only) to warm up the cache."""
+    """Load the configured Coqui TTS model to warm up the cache."""
     print(f"\nSetting up TTS model '{config.tts_model}'...")
     try:
+        import torch
         from TTS.api import TTS
 
-        tts = TTS(model_name=config.tts_model, gpu=False)
-        print(f"  TTS model '{config.tts_model}' is ready.")
+        use_gpu = config.tts_gpu and torch.cuda.is_available()
+        device = "cuda" if use_gpu else "cpu"
+        if (
+            Path(config.tts_model_path).is_file()
+            and Path(config.tts_config_path).is_file()
+        ):
+            tts = TTS(
+                model_path=config.tts_model_path,
+                config_path=config.tts_config_path,
+            ).to(device)
+        else:
+            tts = TTS(model_name=config.tts_model).to(device)
+        print(f"  TTS model '{config.tts_model}' is ready on {device}.")
         del tts
     except Exception as e:
         print(f"  ERROR setting up TTS: {e}")
