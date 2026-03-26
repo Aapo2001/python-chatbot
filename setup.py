@@ -48,6 +48,13 @@ setup(
         (f"share/{package_name}/launch", glob("launch/*.py")),
     ],
     install_requires=["setuptools"],
+    extras_require={
+        "test": [
+            "numpy",
+            "pytest>=8,<10",
+            "pytest-cov>=5,<8",
+        ]
+    },
     zip_safe=True,
     maintainer="OpenAI Codex",
     maintainer_email="noreply@example.com",

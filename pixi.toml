@@ -15,6 +15,8 @@ ninja = "*"
 colcon-common-extensions = "*"
 setuptools = ">=69.5,<80"
 ros-humble-desktop = "*"
+pytest = "*"
+pytest-cov = "*"
 
 [tasks]
 ensure-setuptools-compat = "python tools/ensure_setuptools_compat.py"
@@ -22,6 +24,7 @@ app = "python -m voice_chatbot.app"
 ros-app = "python -m voice_chatbot.ros_app"
 chatbot = "python -m voice_chatbot.chatbot"
 setup-models = "python -m voice_chatbot.setup_models"
+test = "pytest"
 build = { cmd = "colcon build --symlink-install --packages-select voice_chatbot_ros", depends-on = ["ensure-setuptools-compat"] }
 
 [target.win-64.tasks]

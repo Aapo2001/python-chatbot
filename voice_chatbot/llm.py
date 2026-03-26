@@ -74,13 +74,6 @@ class ChatLLM:
             "role": "user",
             "content": user_message,
         }
-        self._conversation_history.append(user_entry)
-
-        # Each "turn" is one user + one assistant message (2 entries).
-        # Trim from the front to keep the most recent context.
-        max_messages = self._max_turns * 2
-        if len(self._conversation_history) > max_messages:
-            self._conversation_history = self._conversation_history[-max_messages:]
 
         # Prepend the system prompt (not part of trimmed history).
         system_entry: ChatCompletionRequestSystemMessage = {
@@ -90,6 +83,7 @@ class ChatLLM:
         messages: list[ChatCompletionRequestMessage] = [
             system_entry,
             *self._conversation_history,
+            user_entry,
         ]
 
         response = cast(
@@ -108,10 +102,16 @@ class ChatLLM:
                 "role": "assistant",
                 "content": assistant_text,
             }
-            self._conversation_history.append(assistant_entry)
+            self._conversation_history.extend([user_entry, assistant_entry])
+
+            # Each "turn" is one user + one assistant message (2 entries).
+            # Trim from the front to keep the most recent complete turns.
+            max_messages = self._max_turns * 2
+            if len(self._conversation_history) > max_messages:
+                self._conversation_history = self._conversation_history[-max_messages:]
             return assistant_text
         return ""
 
-    def clear_history(self):
+    def clear_history(self) -> None:
         """Erase all stored conversation turns."""
         self._conversation_history = []

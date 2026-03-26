@@ -157,6 +157,18 @@ pixi run ros-run /absolute/path/to/config.json
 
 This follows Pixi's ROS 2 workflow with `robostack-humble` packages installed into the Pixi environment.
 
+## Testing
+
+Run the automated unit test suite with:
+
+```powershell
+pixi run test
+```
+
+The repository also includes a GitHub Actions workflow that runs the same
+pytest suite automatically on every push and pull request on both Windows
+and Linux.
+
 ## Configuration
 
 Configuration is defined in `config.py` and can be persisted to `config.json`.

@@ -81,5 +81,8 @@ def setup_espeak() -> None:
     espeak_dir = os.path.join(
         os.environ.get("ProgramFiles", r"C:\Program Files"), "eSpeak NG"
     )
-    if os.path.isdir(espeak_dir) and espeak_dir not in os.environ.get("PATH", ""):
-        os.environ["PATH"] = espeak_dir + os.pathsep + os.environ["PATH"]
+    path_value = os.environ.get("PATH", "")
+    if os.path.isdir(espeak_dir) and espeak_dir not in path_value:
+        os.environ["PATH"] = (
+            espeak_dir if not path_value else espeak_dir + os.pathsep + path_value
+        )
