@@ -1,11 +1,11 @@
 """
 ``setup.py`` for the ``voice_chatbot_ros`` ROS 2 package.
 
-Used by ``colcon build`` (via ``ament_python``) to install the ROS 2
-nodes and their supporting Python modules into the local workspace
-overlay.
+Used **only** by ``colcon build`` (via ``ament_python``).  The standalone
+``voice_chatbot`` pip package is defined in ``pyproject.toml`` and built
+with ``python -m build``.
 
-Entry points register application and ROS console scripts:
+Entry points register ROS console scripts:
 
 - ``voice_chatbot_app`` – standalone desktop GUI
 - ``voice_chatbot_cli`` – terminal runner
@@ -15,10 +15,6 @@ Entry points register application and ROS console scripts:
 - ``voice_stt_node`` – STT split node
 - ``voice_llm_node`` – LLM split node
 - ``voice_tts_node`` – TTS split node
-
-The shared application code now lives in the ``voice_chatbot`` package,
-which is installed alongside the ROS package so the nodes can import it
-without relying on repo-root modules.
 """
 
 from glob import glob
@@ -56,10 +52,10 @@ setup(
         ]
     },
     zip_safe=True,
-    maintainer="OpenAI Codex",
+    maintainer="Aapo",
     maintainer_email="noreply@example.com",
     description="ROS 2 Humble integration for the local voice chatbot pipeline.",
-    license="Proprietary",
+    license="MIT",
     entry_points={
         "console_scripts": [
             "voice_chatbot_app = voice_chatbot.app:main",
