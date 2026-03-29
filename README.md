@@ -1,226 +1,150 @@
 # Voice Chatbot
 
-Local voice chatbot for Windows with a Finnish-first default configuration. The application captures microphone audio, detects speech with Silero VAD, transcribes it with Whisper, generates a reply with a local GGUF LLM, and speaks the reply with Coqui TTS.
+Local speech-to-speech voice assistant with PySide6 GUI and CLI. Captures microphone audio, detects speech with Silero VAD, transcribes with Whisper, generates a reply with a local GGUF LLM, and speaks the reply with Coqui TTS.
 
-The repository's application code now lives under the `voice_chatbot/`
-package. The repo root keeps thin compatibility wrappers (`app.py`,
-`chatbot.py`, `ros_app.py`, `setup_models.py`) so older commands still work.
+Available on PyPI: `pip install voice-chatbot[all]`
 
-Primary entry points:
+## Pipeline
 
-- `python -m voice_chatbot.app`: PySide6 desktop UI for configuring and running the chatbot.
-- `python -m voice_chatbot.chatbot`: terminal-only runner with the same audio pipeline.
-- `python -m voice_chatbot.ros_app`: ROS-connected PySide6 GUI.
-- `voice_chatbot_ros/node.py`: ROS 2 Humble node that exposes the pipeline through ROS topics and a service.
+```
+Microphone → AudioIO → VoiceActivityDetector → SpeechToText → ChatLLM → TextToSpeech → Speaker
+               ▲                                                                          │
+               └── clear_queue() + vad.reset() after playback (prevents self-triggering) ─┘
+```
 
-## What The Code Does
+## Quick Start
 
-Runtime flow:
+### Install from PyPI
 
-1. `AudioIO` captures 16 kHz mono microphone audio in fixed-size chunks.
-2. `VoiceActivityDetector` buffers audio until Silero VAD reports speech start and end.
-3. `SpeechToText` transcribes the captured utterance with `pywhispercpp`.
-4. `ChatLLM` sends the user text plus recent conversation history to `llama-cpp-python`.
-5. `TextToSpeech` synthesizes the assistant reply with Coqui TTS.
-6. `AudioIO` plays the generated speech back through the default output device.
+```bash
+pip install voice-chatbot[all]
+voice-chatbot-setup-models
+voice-chatbot-app
+```
 
-The GUI wraps this pipeline in a background `QThread` and exposes model and runtime settings in a sidebar.
+### Install from source (with pixi)
 
-## Repository Layout
-
-| Path | Purpose |
-| --- | --- |
-| `voice_chatbot/` | Main Python application package for GUI, CLI, config, audio, VAD, STT, LLM, and TTS code |
-| `app.py`, `chatbot.py`, `ros_app.py`, `setup_models.py` | Thin compatibility entry points that call into `voice_chatbot/` |
-| `install.bat` | Windows setup script for Python packages and CUDA builds |
-| `pixi.toml` | Pixi workspace manifest for the base toolchain and common tasks |
-| `pixi.lock` | Resolved Pixi lockfile for the base environment |
-| `tools/install_python_windows.bat` | Pixi bootstrap script for CUDA-enabled Python packages |
-| `tools/install_python_linux.sh` | Pixi bootstrap script for Linux Python packages |
-| `config.json` | Persisted GUI configuration |
-| `voice_chatbot_ros/` | ROS 2 Humble package and node implementation |
-| `launch/` | ROS 2 launch file |
-| `package.xml`, `setup.py`, `setup.cfg` | ROS 2 `ament_python` package metadata |
-
-More implementation detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-ROS-specific usage is in [docs/ROS2.md](docs/ROS2.md).
-
-## Environment Assumptions
-
-The codebase is currently optimized for a Windows workstation with local GPU inference:
-
-- `app.py` and `chatbot.py` add CUDA DLL paths from `CUDA_PATH` or `D:\cuda`.
-- `install.bat` installs CUDA-enabled PyTorch, `llama-cpp-python`, and `pywhispercpp`.
-- The default LLM is a GGUF file under `models/`.
-- The default voice assistant language is Finnish (`fi`).
-
-The code can fall back to CPU for some components, but the intended deployment is local GPU acceleration.
+```bash
+pixi install
+pixi run install-python-deps
+pixi run setup-models
+pixi run app
+```
 
 ## Installation
 
-The recommended setup path is now Pixi. The repository ships with a `pixi.toml` workspace manifest and uses Pixi to install both the base Python toolchain and the ROS 2 Humble packages.
+### Prerequisites
 
-### 1. System prerequisites
+- Python 3.11+
+- CUDA-capable GPU (recommended for real-time inference)
+- espeak-ng (required for Coqui TTS phonemisation)
+  - Windows: install to `C:\Program Files\eSpeak NG`
+  - Linux: `sudo apt install espeak-ng`
+- CUDA toolkit — DLL path defaults to `D:\cuda` (override with `CUDA_PATH` env var)
 
-- Windows
-- `pixi` or permission to let `install.bat` install it
-- CUDA Toolkit if you want GPU acceleration for PyTorch and `llama-cpp-python`
-- CMake and a working build toolchain for Python packages with native extensions
-- Microphone and speakers/headphones configured as default audio devices
+### pip install
 
-### 2. Create the Pixi environment and install packages
+```bash
+# Full installation (all components)
+pip install voice-chatbot[all]
 
-Run:
+# Or pick specific components
+pip install voice-chatbot[stt,llm,tts,vad,gui]
 
-```powershell
-install.bat
+# Core only (numpy, sounddevice, huggingface-hub)
+pip install voice-chatbot
 ```
 
-What the script does:
+### Pixi install (from source)
 
-- installs `pixi` if it is missing
-- creates or updates the local Pixi environment from `pixi.toml`
-- runs the Pixi bootstrap task that installs the Python packages needed by the project
-
-The Pixi workspace provides:
-
-- Python 3.11
-- `pip`
-- `cmake`
-- `git`
-- `ninja`
-- `colcon-common-extensions`
-- `setuptools>=69.5,<80`
-- `ros-humble-desktop`
-
-The bootstrap task installs:
-
-- CUDA-enabled `torch`, `torchvision`, `torchaudio`
-- `llama-cpp-python` compiled with `GGML_CUDA=on`
-- `pywhispercpp` compiled with CUDA flags
-- the remaining packages from `requirements.txt`
-
-It also enforces a `setuptools` version that stays compatible with both `sip`
-and ROS 2 Humble's `colcon` editable Python build flow.
-
-`requirements.txt` is still not the full environment by itself. `torch`, `llama-cpp-python`, and `pywhispercpp` are installed separately because they need a custom wheel index or CUDA-specific build flags.
-
-### 3. Direct Pixi workflow
-
-If you do not want to use `install.bat`, the equivalent commands are:
-
-```powershell
+```bash
 pixi install
 pixi run install-python-deps
 ```
 
-`pixi run build` also re-checks the `setuptools` compatibility window before
-invoking `colcon`.
+### Download models
 
-### 4. Download models
+```bash
+# Via pip entry point
+voice-chatbot-setup-models
 
-Run:
-
-```powershell
+# Or via pixi
 pixi run setup-models
 ```
 
-This script:
+Models are downloaded to `models/` (gitignored).
 
-- checks CUDA visibility in PyTorch
-- initializes the Silero VAD model
-- downloads or validates the configured Whisper model
-- downloads the configured GGUF LLM from Hugging Face if missing
-- initializes the configured Coqui TTS model
+## Usage
 
-## Running The Application
-
-Desktop UI:
-
-```powershell
-pixi run app
-# equivalent: python -m voice_chatbot.app
-```
-
-Terminal mode:
-
-```powershell
-pixi run chatbot
-# equivalent: python -m voice_chatbot.chatbot
-```
-
-ROS 2 Humble node:
+### Desktop GUI (primary)
 
 ```bash
-pixi run ros-run /absolute/path/to/config.json
+voice-chatbot-app
+# or: pixi run app
+# or: python -m voice_chatbot.app
 ```
 
-This follows Pixi's ROS 2 workflow with `robostack-humble` packages installed into the Pixi environment.
+The GUI provides a settings sidebar, chat panel with text input, system log, and start/stop/restart controls. Text input lets you type messages directly to the LLM. TTS can be toggled on/off in settings without restarting.
 
-## Testing
+### CLI (headless)
 
-Run the automated unit test suite with:
-
-```powershell
-pixi run test
+```bash
+voice-chatbot
+# or: pixi run chatbot
+# or: python -m voice_chatbot.chatbot
 ```
 
-The repository also includes a GitHub Actions workflow that runs the same
-pytest suite automatically on every push and pull request on both Windows
-and Linux.
+## Project Structure
+
+```
+voice_chatbot/          Main Python package
+├── app.py              PySide6 desktop GUI
+├── chatbot.py          Headless CLI runner
+├── config.py           Config dataclass + JSON persistence
+├── audio_io.py         Microphone capture + playback (sounddevice)
+├── vad.py              Silero-VAD wrapper with pre-buffer
+├── stt.py              Whisper STT (faster-whisper / CTranslate2)
+├── llm.py              LLaMA multi-turn chat (llama-cpp-python)
+├── tts_engine.py       Coqui TTS wrapper
+├── ui_common.py        Shared PySide6 UI components
+├── platform_setup.py   CUDA / PySide6 DLL setup
+└── setup_models.py     Model download + validation
+
+tests/                  Pytest test suite (36 tests)
+tools/
+├── install_python_windows.bat
+└── install_python_linux.sh
+
+pyproject.toml          Package metadata + build config
+pixi.toml               Pixi workspace manifest
+config.json             Runtime configuration (saved by GUI)
+```
 
 ## Configuration
 
-Configuration is defined in `config.py` and can be persisted to `config.json`.
+All runtime settings are in `config.json`. The GUI reads/writes this file. Key fields:
 
-Important settings:
+- `language` — STT/TTS language code (default: `"fi"`)
+- `whisper_model` — Whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`)
+- `llm_model_path` — Path to GGUF model file
+- `tts_model` — Coqui TTS model identifier
+- `tts_enabled` — Enable/disable TTS playback
+- `vad_threshold`, `min_silence_duration_ms`, `vad_pre_buffer_ms` — VAD sensitivity
+- `llm_temperature`, `llm_n_ctx`, `llm_max_tokens` — LLM generation control
+- `max_conversation_turns` — History trimming limit
 
-- Audio: `sample_rate`, `channels`, `chunk_samples`
-- VAD: `vad_threshold`, `min_silence_duration_ms`, `speech_pad_ms`, `min_speech_duration_ms`, `vad_pre_buffer_ms`
-- STT: `language`, `whisper_model`, `whisper_n_threads`
-- LLM: `llm_model_path`, `llm_n_gpu_layers`, `llm_n_ctx`, `llm_max_tokens`, `llm_temperature`, `llm_system_prompt`, `max_conversation_turns`
-- TTS: `tts_model`, `tts_gpu`
-- Download metadata: `llm_repo_id`, `llm_filename`
+## Testing
 
-### Configuration behavior to know
+```bash
+pixi run test
+# or: pytest
+```
 
-- The GUI loads from `config.json` through `Config.load()` and writes the current sidebar values back to disk when you start the worker.
-- The CLI and model setup script also load `config.json` by default, so they now use the same persisted settings as the GUI unless you edit the package code.
+## Related Repositories
 
-## GUI Behavior
+- [voice-chatbot-ros](https://github.com/Aapo2001/voice-chatbot-ros) — ROS 2 Humble integration (depends on this pip package)
+- [voice-chatbot-docs](https://github.com/Aapo2001/voice-chatbot-docs) — Documentation website ([live site](https://docs-site-kappa-coral.vercel.app))
 
-The desktop app provides:
+## License
 
-- a settings sidebar for language, Whisper, LLM, TTS, and VAD parameters
-- a chat panel for user and assistant messages
-- a system log panel that receives redirected `stdout` and `stderr`
-- start, stop, restart, and clear-chat controls
-
-Behavior details from the current code:
-
-- Settings remain editable while the worker is running.
-- Changing settings during runtime requires `Käynnistä uudelleen` to rebuild the worker with the new values.
-- `Tyhjennä keskustelu` clears the visible chat panel only. It does not clear the LLM conversation history; history resets only when a new `ChatLLM` instance is created, such as after restart.
-
-## Architecture Notes
-
-- The VAD implementation keeps a rolling pre-buffer so the first syllables are not clipped before speech onset is confirmed.
-- After TTS playback, the app clears queued microphone chunks and resets VAD state to reduce the chance of transcribing its own synthesized output.
-- The LLM wrapper stores alternating user and assistant messages and trims the oldest turns once `max_conversation_turns` is exceeded.
-- The GUI runs model loading and the audio loop in `ChatbotWorker`, a `QThread`, so the main UI thread stays responsive.
-
-## Operational Limitations
-
-- There are no automated tests in the repository.
-- Audio device selection is not exposed; capture and playback use the default system devices through `sounddevice`.
-- The code and UI text are partly Finnish and partly English.
-- Model initialization happens synchronously inside the worker or CLI startup path, so startup cost depends on model size.
-- ROS 2 support assumes the Robostack Humble packages and the ML/audio dependencies can coexist in the same Pixi environment.
-
-## Suggested First Run
-
-1. Run `install.bat`.
-2. Run `pixi run setup-models`.
-3. Start `pixi run app`.
-4. Confirm the GGUF model path in the left sidebar.
-5. Click `Käynnistä` and watch the system log for CUDA and model load status.
+MIT
