@@ -9,14 +9,13 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Build artifacts
+/dist/
+/build/
+
 # Virtual environments
 /venv/
 /.pixi/
-
-# ROS 2 colcon build artifacts
-/build/
-/install/
-/log/
 
 # Setuptools probe directories (left by pip/colcon)
 .tmp_setuptools_probe*/
@@ -31,4 +30,3 @@ __pycache__/
 qt_debug.txt
 
 /.tmp_basedpyright/
-.vercel
