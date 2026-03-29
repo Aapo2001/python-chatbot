@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
@@ -61,6 +62,19 @@ class ChatbotWorker(QThread):
         super().__init__(parent)
         self._config = config
         self._running = False
+        self._tts_enabled = config.tts_enabled
+        self._text_queue: list[str] = []
+        self._llm = None
+        self._tts = None
+        self._audio = None
+
+    def send_text(self, text: str) -> None:
+        """Queue a text message from the GUI input field."""
+        self._text_queue.append(text)
+
+    def set_tts_enabled(self, enabled: bool) -> None:
+        """Toggle TTS on/off at runtime (thread-safe for simple bool)."""
+        self._tts_enabled = enabled
 
     def stop(self) -> None:
         self._running = False
@@ -99,11 +113,14 @@ class ChatbotWorker(QThread):
             from .llm import ChatLLM
 
             llm = ChatLLM(self._config)
+            self._llm = llm
 
             self.log.emit("[Init] Coqui TTS...")
             from .tts_engine import TextToSpeech
 
             tts = TextToSpeech(self._config)
+            self._tts = tts
+            self._audio = audio
 
             self.log.emit("Kaikki mallit ladattu onnistuneesti!")
             self.models_ready.emit()
@@ -112,6 +129,22 @@ class ChatbotWorker(QThread):
             # ── Audio loop ──
             audio.start_capture()
             while self._running:
+                # Process queued text input from the GUI
+                if self._text_queue:
+                    text = self._text_queue.pop(0)
+                    self.chat_message.emit("user", text)
+                    self.status_changed.emit("LLM vastaa...")
+                    response = llm.chat(text)
+                    self.chat_message.emit("assistant", response)
+                    if self._tts_enabled:
+                        self.status_changed.emit("Puhutaan...")
+                        audio_out, sr = tts.synthesize(response)
+                        audio.play_audio(audio_out, sr)
+                        audio.clear_queue()
+                        vad.reset()
+                    self.status_changed.emit("Kuunnellaan...")
+                    continue
+
                 chunk = audio.get_audio_chunk(timeout=0.1)
                 if chunk is None:
                     continue
@@ -133,9 +166,10 @@ class ChatbotWorker(QThread):
                     response = llm.chat(text)
                     self.chat_message.emit("assistant", response)
 
-                    self.status_changed.emit("Puhutaan...")
-                    audio_out, sr = tts.synthesize(response)
-                    audio.play_audio(audio_out, sr)
+                    if self._tts_enabled:
+                        self.status_changed.emit("Puhutaan...")
+                        audio_out, sr = tts.synthesize(response)
+                        audio.play_audio(audio_out, sr)
 
                     audio.clear_queue()
                     vad.reset()
@@ -272,6 +306,28 @@ class MainWindow(QMainWindow):
             "border: 1px solid #45475a; border-radius: 4px; padding: 8px; }"
         )
         chat_layout.addWidget(self.chat_display)
+
+        # Text input bar
+        input_row = QHBoxLayout()
+        self.text_input = QLineEdit()
+        self.text_input.setPlaceholderText("Kirjoita viesti...")
+        self.text_input.setFont(QFont("Segoe UI", 11))
+        self.text_input.setStyleSheet(
+            "QLineEdit { background-color: #1e1e2e; color: #cdd6f4; "
+            "border: 1px solid #45475a; border-radius: 4px; padding: 6px 8px; }"
+        )
+        self.btn_send = QPushButton("Lähetä")
+        self.btn_send.setMinimumHeight(32)
+        self.btn_send.setStyleSheet(
+            "QPushButton { background-color: #6366f1; color: white; "
+            "font-weight: bold; padding: 4px 16px; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #818cf8; }"
+            "QPushButton:disabled { background-color: #666; }"
+        )
+        input_row.addWidget(self.text_input)
+        input_row.addWidget(self.btn_send)
+        chat_layout.addLayout(input_row)
+
         right_splitter.addWidget(chat_container)
 
         # Log panel
@@ -303,11 +359,15 @@ class MainWindow(QMainWindow):
         self.btn_stop.clicked.connect(self._on_stop)
         self.btn_restart.clicked.connect(self._on_restart)
         self.btn_clear.clicked.connect(self._on_clear)
+        self.btn_send.clicked.connect(self._on_send_text)
+        self.text_input.returnPressed.connect(self._on_send_text)
 
     def _set_running_state(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         self.btn_restart.setEnabled(running)
+        self.btn_send.setEnabled(running)
+        self.text_input.setEnabled(running)
         self.settings_panel.setEnabled(True)
 
     def _build_config_from_ui(self) -> Config:
@@ -355,6 +415,7 @@ class MainWindow(QMainWindow):
             lambda: append_log(self.log_display, "Kaikki mallit valmiina."), Q
         )
         self._worker.finished.connect(self._on_worker_finished)
+        self.settings_panel.chk_tts_enabled.toggled.connect(self._worker.set_tts_enabled)
         self._worker.start()
 
     def _on_stop(self) -> None:
@@ -371,6 +432,13 @@ class MainWindow(QMainWindow):
             self._worker.stop()
         else:
             self._on_start()
+
+    def _on_send_text(self) -> None:
+        text = self.text_input.text().strip()
+        if not text or self._worker is None:
+            return
+        self._worker.send_text(text)
+        self.text_input.clear()
 
     def _on_clear(self) -> None:
         self.chat_display.clear()

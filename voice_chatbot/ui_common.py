@@ -330,6 +330,8 @@ class SettingsPanel(QScrollArea):
         # ── TTS extra ──
         grp_tts = QGroupBox("TTS-asetukset")
         form_tts = QFormLayout(grp_tts)
+        self.chk_tts_enabled = QCheckBox("Puhesynteesi käytössä")
+        form_tts.addRow(self.chk_tts_enabled)
         self.chk_tts_gpu = QCheckBox("Käytä GPU:ta")
         form_tts.addRow(self.chk_tts_gpu)
         layout.addWidget(grp_tts)
@@ -361,6 +363,7 @@ class SettingsPanel(QScrollArea):
         self.spin_min_speech.setValue(cfg.min_speech_duration_ms)
         self.spin_pre_buffer.setValue(cfg.vad_pre_buffer_ms)
 
+        self.chk_tts_enabled.setChecked(cfg.tts_enabled)
         self.chk_tts_gpu.setChecked(cfg.tts_gpu)
 
     def write_to_config(self, cfg: Config) -> Config:
@@ -383,6 +386,7 @@ class SettingsPanel(QScrollArea):
         cfg.min_speech_duration_ms = self.spin_min_speech.value()
         cfg.vad_pre_buffer_ms = self.spin_pre_buffer.value()
 
+        cfg.tts_enabled = self.chk_tts_enabled.isChecked()
         cfg.tts_gpu = self.chk_tts_gpu.isChecked()
         return cfg
 

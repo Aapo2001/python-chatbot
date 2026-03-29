@@ -31,3 +31,4 @@ __pycache__/
 qt_debug.txt
 
 /.tmp_basedpyright/
+.vercel

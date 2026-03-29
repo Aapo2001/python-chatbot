@@ -86,6 +86,7 @@ class Config:
     tts_model_path: str = "models/model.pth"  # local VITS checkpoint
     tts_config_path: str = "models/config.json"  # local VITS config
     tts_gpu: bool = True  # use CUDA for TTS synthesis
+    tts_enabled: bool = True  # enable TTS playback (disable for text-only mode)
 
     # ── HuggingFace model repo (used by setup_models.py) ─────────
     llm_repo_id: str = "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"
