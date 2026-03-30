@@ -22,5 +22,8 @@ pytest = ">=9,<10"
 [target.win-64.tasks]
 install-python-deps = "cmd /d /c tools\\install_python_windows.bat"
 
+[target.linux-64.dependencies]
+alsa-lib = "*"
+
 [target.linux-64.tasks]
 install-python-deps = "bash tools/install_python_linux.sh"

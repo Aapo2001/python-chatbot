@@ -10,7 +10,7 @@ Or pick components individually::
     pip install voice-chatbot[stt,llm,tts,vad,gui]
 """
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 from .config import Config
 
