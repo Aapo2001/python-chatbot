@@ -119,12 +119,14 @@ tools/
 
 pyproject.toml          Package metadata + build config
 pixi.toml               Pixi workspace manifest
-config.json             Runtime configuration (saved by GUI)
+per-user config file    Runtime configuration (saved by GUI)
 ```
 
 ## Configuration
 
-All runtime settings are in `config.json`. The GUI reads/writes this file. Key fields:
+All runtime settings are stored in a per-user config file. By default this is `%APPDATA%\voice-chatbot\config.json` on Windows and `$XDG_CONFIG_HOME/voice-chatbot/config.json` (or `~/.config/voice-chatbot/config.json`) on Linux. Override it with `VOICE_CHATBOT_CONFIG` if needed.
+
+Key fields:
 
 - `language` — STT/TTS language code (default: `"fi"`)
 - `whisper_model` — Whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`)

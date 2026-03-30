@@ -41,7 +41,7 @@ Defines the `Config` dataclass and JSON serialization helpers.
 
 - stores runtime defaults for audio, VAD, STT, LLM, and TTS
 - persists configuration with `save()`
-- loads compatible fields from `config.json` with `load()`
+- loads compatible fields from the per-user config file with `load()`
 
 The `load()` implementation ignores unknown JSON keys, which makes config evolution tolerant to stale fields.
 
@@ -111,14 +111,14 @@ Pre-flight model setup script.
 - triggers model downloads and cache initialization
 - downloads the configured GGUF file from Hugging Face if missing
 
-This script loads `config.json` through `Config.load()`.
+This script loads the per-user config file through `Config.load()`.
 
 ## GUI Runtime Sequence
 
 When the user clicks `Käynnistä`:
 
 1. `MainWindow` reads widget values into a fresh `Config`.
-2. The config is written to `config.json`.
+2. The config is written to the per-user config file.
 3. The LLM file path is validated.
 4. `ChatbotWorker` starts in a background thread.
 5. The worker initializes `AudioIO`, VAD, STT, LLM, and TTS.
@@ -138,10 +138,10 @@ During speech:
 
 There are two distinct kinds of state:
 
-- persisted configuration in `config.json`
+- persisted configuration in the per-user config file
 - in-memory conversation history inside `ChatLLM`
 
-The GUI "clear chat" action affects only the rendered chat panel. It does not clear the in-memory conversation history held by the active `ChatLLM` instance.
+The GUI "clear chat" action clears both the rendered chat panel and the active `ChatLLM` conversation history.
 
 ## Platform Assumptions
 

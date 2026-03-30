@@ -49,8 +49,6 @@ def test_setup_llm_skips_download_when_model_exists(monkeypatch, tmp_path, capsy
     config = Config(
         models_dir=str(tmp_path),
         llm_model_path=str(model_path),
-        llm_repo_id="repo/demo",
-        llm_filename="model.gguf",
     )
 
     module.setup_llm(config)
@@ -69,8 +67,6 @@ def test_setup_llm_downloads_and_renames_model(monkeypatch, tmp_path):
     config = Config(
         models_dir=str(target.parent),
         llm_model_path=str(target),
-        llm_repo_id="repo/demo",
-        llm_filename="downloaded.gguf",
     )
     calls = []
 
@@ -87,8 +83,8 @@ def test_setup_llm_downloads_and_renames_model(monkeypatch, tmp_path):
 
     assert calls == [
         {
-            "repo_id": "repo/demo",
-            "filename": "downloaded.gguf",
+            "repo_id": module.DEFAULT_LLM_REPO_ID,
+            "filename": module.DEFAULT_LLM_FILENAME,
             "local_dir": str(target.parent),
         }
     ]
@@ -102,8 +98,6 @@ def test_setup_llm_exits_when_download_fails(monkeypatch, tmp_path):
     config = Config(
         models_dir=str(tmp_path / "models"),
         llm_model_path=str(tmp_path / "models" / "missing.gguf"),
-        llm_repo_id="repo/demo",
-        llm_filename="missing.gguf",
     )
 
     install_module(
@@ -111,7 +105,9 @@ def test_setup_llm_exits_when_download_fails(monkeypatch, tmp_path):
         "huggingface_hub",
         make_module(
             "huggingface_hub",
-            hf_hub_download=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+            hf_hub_download=lambda **kwargs: (_ for _ in ()).throw(
+                RuntimeError("boom")
+            ),
         ),
     )
 
@@ -129,9 +125,15 @@ def test_main_runs_setup_steps_in_order(monkeypatch):
     monkeypatch.setattr(module.Config, "load", classmethod(lambda cls: config))
     monkeypatch.setattr(module, "check_cuda", lambda: calls.append("check_cuda"))
     monkeypatch.setattr(module, "setup_vad", lambda: calls.append("setup_vad"))
-    monkeypatch.setattr(module, "setup_whisper", lambda cfg: calls.append(("setup_whisper", cfg)))
-    monkeypatch.setattr(module, "setup_llm", lambda cfg: calls.append(("setup_llm", cfg)))
-    monkeypatch.setattr(module, "setup_tts", lambda cfg: calls.append(("setup_tts", cfg)))
+    monkeypatch.setattr(
+        module, "setup_whisper", lambda cfg: calls.append(("setup_whisper", cfg))
+    )
+    monkeypatch.setattr(
+        module, "setup_llm", lambda cfg: calls.append(("setup_llm", cfg))
+    )
+    monkeypatch.setattr(
+        module, "setup_tts", lambda cfg: calls.append(("setup_tts", cfg))
+    )
 
     module.main()
 
@@ -141,4 +143,32 @@ def test_main_runs_setup_steps_in_order(monkeypatch):
         ("setup_whisper", config),
         ("setup_llm", config),
         ("setup_tts", config),
+    ]
+
+
+def test_main_skips_tts_setup_when_disabled(monkeypatch):
+    module, _ = load_setup_models_module(monkeypatch)
+    config = Config(tts_enabled=False)
+    calls = []
+
+    monkeypatch.setattr(module.Config, "load", classmethod(lambda cls: config))
+    monkeypatch.setattr(module, "check_cuda", lambda: calls.append("check_cuda"))
+    monkeypatch.setattr(module, "setup_vad", lambda: calls.append("setup_vad"))
+    monkeypatch.setattr(
+        module, "setup_whisper", lambda cfg: calls.append(("setup_whisper", cfg))
+    )
+    monkeypatch.setattr(
+        module, "setup_llm", lambda cfg: calls.append(("setup_llm", cfg))
+    )
+    monkeypatch.setattr(
+        module, "setup_tts", lambda cfg: calls.append(("setup_tts", cfg))
+    )
+
+    module.main()
+
+    assert calls == [
+        "check_cuda",
+        "setup_vad",
+        ("setup_whisper", config),
+        ("setup_llm", config),
     ]

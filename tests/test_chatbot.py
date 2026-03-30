@@ -3,13 +3,21 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import voice_chatbot.platform_setup as platform_setup
 from voice_chatbot.config import Config
 
 
 def _import_chatbot_module(
-    monkeypatch, fresh_import, module_factory, stt_text="hei", llm_reply="moi"
+    monkeypatch,
+    fresh_import,
+    module_factory,
+    stt_text="hei",
+    llm_reply="moi",
+    config=None,
+    include_tts_module=True,
+    llm_error=None,
 ):
     monkeypatch.setattr(platform_setup, "setup_cuda", lambda: None)
 
@@ -78,6 +86,8 @@ def _import_chatbot_module(
 
         def chat(self, text):
             self.calls.append(text)
+            if llm_error is not None:
+                raise llm_error
             return llm_reply
 
     class FakeTts:
@@ -90,25 +100,30 @@ def _import_chatbot_module(
             return np.array([0.25, -0.25], dtype=np.float32), 24000
 
     config_module = importlib.import_module("voice_chatbot.config")
-    monkeypatch.setattr(config_module.Config, "load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        config_module.Config,
+        "load",
+        classmethod(lambda cls: config if config is not None else Config()),
+    )
+
+    stub_modules = {
+        "voice_chatbot.audio_io": module_factory(
+            "voice_chatbot.audio_io", AudioIO=FakeAudioIO
+        ),
+        "voice_chatbot.vad": module_factory(
+            "voice_chatbot.vad", VoiceActivityDetector=FakeVad
+        ),
+        "voice_chatbot.stt": module_factory("voice_chatbot.stt", SpeechToText=FakeStt),
+        "voice_chatbot.llm": module_factory("voice_chatbot.llm", ChatLLM=FakeLlm),
+    }
+    if include_tts_module:
+        stub_modules["voice_chatbot.tts_engine"] = module_factory(
+            "voice_chatbot.tts_engine", TextToSpeech=FakeTts
+        )
 
     module = fresh_import(
         "voice_chatbot.chatbot",
-        stub_modules={
-            "voice_chatbot.audio_io": module_factory(
-                "voice_chatbot.audio_io", AudioIO=FakeAudioIO
-            ),
-            "voice_chatbot.vad": module_factory(
-                "voice_chatbot.vad", VoiceActivityDetector=FakeVad
-            ),
-            "voice_chatbot.stt": module_factory(
-                "voice_chatbot.stt", SpeechToText=FakeStt
-            ),
-            "voice_chatbot.llm": module_factory("voice_chatbot.llm", ChatLLM=FakeLlm),
-            "voice_chatbot.tts_engine": module_factory(
-                "voice_chatbot.tts_engine", TextToSpeech=FakeTts
-            ),
-        },
+        stub_modules=stub_modules,
         clear_modules=["voice_chatbot.chatbot"],
     )
     return module, state
@@ -152,4 +167,38 @@ def test_run_skips_llm_and_tts_when_transcript_is_blank(
     assert state["audio"].play_calls == []
     assert state["audio"].cleared is False
     assert state["vad"].reset_calls == 0
+    assert state["audio"].closed is True
+
+
+def test_tts_is_not_required_when_disabled(monkeypatch, fresh_import, module_factory):
+    module, state = _import_chatbot_module(
+        monkeypatch,
+        fresh_import,
+        module_factory,
+        config=Config(tts_enabled=False),
+        include_tts_module=False,
+    )
+
+    chatbot = module.VoiceChatbot()
+    chatbot.run()
+
+    assert "tts" not in state
+    assert state["audio"].play_calls == []
+    assert state["audio"].closed is True
+
+
+def test_audio_is_closed_when_pipeline_raises(
+    monkeypatch, fresh_import, module_factory
+):
+    module, state = _import_chatbot_module(
+        monkeypatch,
+        fresh_import,
+        module_factory,
+        llm_error=RuntimeError("boom"),
+    )
+    chatbot = module.VoiceChatbot()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        chatbot.run()
+
     assert state["audio"].closed is True

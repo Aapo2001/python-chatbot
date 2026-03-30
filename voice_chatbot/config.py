@@ -20,10 +20,41 @@ Sections
 """
 
 import json
+import os
 from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 
-# Default path for the JSON configuration file (project root).
-CONFIG_FILE = "config.json"
+APP_DIR_NAME = "voice-chatbot"
+CONFIG_ENV_VAR = "VOICE_CHATBOT_CONFIG"
+
+
+def default_config_path() -> Path:
+    """Return the per-user config file path.
+
+    The old project-root ``config.json`` location made the current working
+    directory part of the trust boundary. Store the file in the user's config
+    directory instead, while allowing an explicit override for tests and power
+    users.
+    """
+    override = os.environ.get(CONFIG_ENV_VAR)
+    if override:
+        return Path(override).expanduser()
+
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / APP_DIR_NAME / "config.json"
+
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home) / APP_DIR_NAME / "config.json"
+
+    return Path.home() / ".config" / APP_DIR_NAME / "config.json"
+
+
+def resolve_config_path(path: str | Path | None = None) -> Path:
+    """Resolve an explicit config path or the default per-user location."""
+    return default_config_path() if path is None else Path(path).expanduser()
 
 
 @dataclass
@@ -88,23 +119,23 @@ class Config:
     tts_gpu: bool = True  # use CUDA for TTS synthesis
     tts_enabled: bool = True  # enable TTS playback (disable for text-only mode)
 
-    # ── HuggingFace model repo (used by setup_models.py) ─────────
-    llm_repo_id: str = "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"
-    llm_filename: str = "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
-
     # ── Persistence ───────────────────────────────────────────────
 
-    def save(self, path: str = CONFIG_FILE) -> None:
+    def save(self, path: str | Path | None = None) -> None:
         """Serialise the current config to a JSON file.
 
         Args:
-            path: Output file path.  Defaults to ``config.json``.
+            path: Output file path. Defaults to the per-user config file.
         """
-        with open(path, "w", encoding="utf-8") as f:
+        target = resolve_config_path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = target.with_suffix(target.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(asdict(self), f, indent=2, ensure_ascii=False)
+        tmp_path.replace(target)
 
     @classmethod
-    def load(cls, path: str = CONFIG_FILE) -> "Config":
+    def load(cls, path: str | Path | None = None) -> "Config":
         """Load a config from a JSON file, falling back to defaults.
 
         Keys in the JSON that do not correspond to a dataclass field
@@ -112,13 +143,14 @@ class Config:
         after new fields are added.
 
         Args:
-            path: Input file path.  Defaults to ``config.json``.
+            path: Input file path. Defaults to the per-user config file.
 
         Returns:
             A populated :class:`Config` instance.
         """
+        source = resolve_config_path(path)
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(source, "r", encoding="utf-8") as f:
                 data = json.load(f)
             # Filter out any keys that are not declared fields
             valid_fields = {field.name for field in fields(cls)}

@@ -10,7 +10,9 @@ Usage::
     # or: python -m voice_chatbot.app
 """
 
+import queue
 import sys
+import threading
 import traceback
 from pathlib import Path
 
@@ -39,7 +41,6 @@ from PySide6.QtWidgets import (
 from .config import Config
 from .ui_common import (
     APP_STYLESHEET,
-    LogStream,
     SettingsPanel,
     append_chat,
     append_log,
@@ -62,32 +63,44 @@ class ChatbotWorker(QThread):
         super().__init__(parent)
         self._config = config
         self._running = False
-        self._tts_enabled = config.tts_enabled
-        self._text_queue: list[str] = []
+        self._tts_enabled = threading.Event()
+        if config.tts_enabled:
+            self._tts_enabled.set()
+        self._text_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         self._llm = None
         self._tts = None
         self._audio = None
 
     def send_text(self, text: str) -> None:
         """Queue a text message from the GUI input field."""
-        self._text_queue.append(text)
+        self._text_queue.put(text)
 
     def set_tts_enabled(self, enabled: bool) -> None:
-        """Toggle TTS on/off at runtime (thread-safe for simple bool)."""
-        self._tts_enabled = enabled
+        """Toggle TTS on/off at runtime."""
+        if enabled:
+            self._tts_enabled.set()
+        else:
+            self._tts_enabled.clear()
+
+    def clear_history(self) -> None:
+        """Clear the in-memory LLM conversation history."""
+        if self._llm is not None:
+            self._llm.clear_history()
 
     def stop(self) -> None:
         self._running = False
 
+    def _ensure_tts(self):
+        """Lazily initialize TTS so text-only mode does not require it."""
+        if self._tts is None:
+            self.log.emit("[Init] Coqui TTS...")
+            from .tts_engine import TextToSpeech
+
+            self._tts = TextToSpeech(self._config)
+        return self._tts
+
     def run(self) -> None:
         self._running = True
-
-        # Redirect stdout/stderr so library prints appear in the log panel
-        log_stream = LogStream()
-        log_stream.message.connect(self.log.emit, Qt.ConnectionType.QueuedConnection)
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = log_stream
-        sys.stderr = log_stream
 
         audio = None
         try:
@@ -115,14 +128,9 @@ class ChatbotWorker(QThread):
             llm = ChatLLM(self._config)
             self._llm = llm
 
-            self.log.emit("[Init] Coqui TTS...")
-            from .tts_engine import TextToSpeech
-
-            tts = TextToSpeech(self._config)
-            self._tts = tts
             self._audio = audio
 
-            self.log.emit("Kaikki mallit ladattu onnistuneesti!")
+            self.log.emit("Ydinmallit ladattu onnistuneesti!")
             self.models_ready.emit()
             self.status_changed.emit("Kuunnellaan...")
 
@@ -130,13 +138,18 @@ class ChatbotWorker(QThread):
             audio.start_capture()
             while self._running:
                 # Process queued text input from the GUI
-                if self._text_queue:
-                    text = self._text_queue.pop(0)
+                try:
+                    text = self._text_queue.get_nowait()
+                except queue.Empty:
+                    text = None
+
+                if text is not None:
                     self.chat_message.emit("user", text)
                     self.status_changed.emit("LLM vastaa...")
                     response = llm.chat(text)
                     self.chat_message.emit("assistant", response)
-                    if self._tts_enabled:
+                    if self._tts_enabled.is_set():
+                        tts = self._ensure_tts()
                         self.status_changed.emit("Puhutaan...")
                         audio_out, sr = tts.synthesize(response)
                         audio.play_audio(audio_out, sr)
@@ -166,7 +179,8 @@ class ChatbotWorker(QThread):
                     response = llm.chat(text)
                     self.chat_message.emit("assistant", response)
 
-                    if self._tts_enabled:
+                    if self._tts_enabled.is_set():
+                        tts = self._ensure_tts()
                         self.status_changed.emit("Puhutaan...")
                         audio_out, sr = tts.synthesize(response)
                         audio.play_audio(audio_out, sr)
@@ -180,8 +194,6 @@ class ChatbotWorker(QThread):
         finally:
             if audio is not None:
                 audio.close()
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
             self.status_changed.emit("Pysäytetty")
 
     def _emit_system_info(self) -> None:
@@ -412,10 +424,12 @@ class MainWindow(QMainWindow):
         )
         self._worker.error_occurred.connect(self._on_error, Q)
         self._worker.models_ready.connect(
-            lambda: append_log(self.log_display, "Kaikki mallit valmiina."), Q
+            lambda: append_log(self.log_display, "Ydinmallit valmiina."), Q
         )
         self._worker.finished.connect(self._on_worker_finished)
-        self.settings_panel.chk_tts_enabled.toggled.connect(self._worker.set_tts_enabled)
+        self.settings_panel.chk_tts_enabled.toggled.connect(
+            self._worker.set_tts_enabled
+        )
         self._worker.start()
 
     def _on_stop(self) -> None:
@@ -442,6 +456,8 @@ class MainWindow(QMainWindow):
 
     def _on_clear(self) -> None:
         self.chat_display.clear()
+        if self._worker is not None:
+            self._worker.clear_history()
 
     def _on_worker_finished(self) -> None:
         self._worker = None

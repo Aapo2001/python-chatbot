@@ -32,9 +32,18 @@ class SpeechToText:
 
     def __init__(self, config: Config):
         self._language = config.language
-        use_gpu = config.whisper_gpu
+        use_gpu = False
+        if config.whisper_gpu:
+            try:
+                import torch
+
+                use_gpu = torch.cuda.is_available()
+            except Exception:
+                use_gpu = False
         device = "cuda" if use_gpu else "cpu"
         compute_type = "float16" if use_gpu else "int8"
+        if config.whisper_gpu and not use_gpu:
+            print("[STT] CUDA not available, falling back to CPU Whisper inference.")
         print(
             f"[STT] Loading Whisper model '{config.whisper_model}' on {device} "
             f"(compute_type: {compute_type}, language: {self._language})..."

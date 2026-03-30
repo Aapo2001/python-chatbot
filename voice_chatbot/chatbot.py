@@ -17,7 +17,6 @@ from .audio_io import AudioIO
 from .config import Config
 from .llm import ChatLLM
 from .stt import SpeechToText
-from .tts_engine import TextToSpeech
 from .vad import VoiceActivityDetector
 
 
@@ -41,7 +40,11 @@ class VoiceChatbot:
 
         self._stt = SpeechToText(self._config)
         self._llm = ChatLLM(self._config)
-        self._tts = TextToSpeech(self._config)
+        self._tts = None
+        if self._config.tts_enabled:
+            from .tts_engine import TextToSpeech
+
+            self._tts = TextToSpeech(self._config)
 
         print()
         print("Kaikki mallit ladattu onnistuneesti!")
@@ -74,16 +77,17 @@ class VoiceChatbot:
                     response = self._llm.chat(text)
                     print(f"Botti: {response}")
 
-                    audio_out, sr = self._tts.synthesize(response)
-                    self._audio.play_audio(audio_out, sr)
-                    self._audio.clear_queue()
-                    self._vad.reset()
+                    if self._tts is not None:
+                        audio_out, sr = self._tts.synthesize(response)
+                        self._audio.play_audio(audio_out, sr)
+                        self._audio.clear_queue()
+                        self._vad.reset()
 
         except KeyboardInterrupt:
             print("\n\nSammutetaan...")
-
-        self._audio.close()
-        print("Näkemiin!")
+        finally:
+            self._audio.close()
+            print("Näkemiin!")
 
 
 def main() -> None:

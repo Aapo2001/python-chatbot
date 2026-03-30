@@ -20,6 +20,9 @@ setup_cuda()
 
 from .config import Config
 
+DEFAULT_LLM_REPO_ID = "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"
+DEFAULT_LLM_FILENAME = "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+
 
 def check_cuda() -> None:
     """Verify that PyTorch is installed and can see a CUDA GPU."""
@@ -74,15 +77,15 @@ def setup_llm(config: Config) -> None:
         print(f"  LLM model already exists: {model_path} ({size_gb:.1f} GB)")
         return
 
-    print(f"  Downloading '{config.llm_filename}' from '{config.llm_repo_id}'...")
+    print(f"  Downloading '{DEFAULT_LLM_FILENAME}' from '{DEFAULT_LLM_REPO_ID}'...")
     os.makedirs(config.models_dir, exist_ok=True)
 
     try:
         from huggingface_hub import hf_hub_download
 
         downloaded_path = hf_hub_download(
-            repo_id=config.llm_repo_id,
-            filename=config.llm_filename,
+            repo_id=DEFAULT_LLM_REPO_ID,
+            filename=DEFAULT_LLM_FILENAME,
             local_dir=config.models_dir,
         )
         print(f"  Downloaded to: {downloaded_path}")
@@ -93,7 +96,7 @@ def setup_llm(config: Config) -> None:
     except Exception as e:
         print(f"  ERROR downloading LLM: {e}")
         print(
-            f"  You can manually download from: https://huggingface.co/{config.llm_repo_id}"
+            f"  You can manually download from: https://huggingface.co/{DEFAULT_LLM_REPO_ID}"
         )
         print(f"  Place the GGUF file at: {model_path}")
         sys.exit(1)
@@ -149,7 +152,10 @@ def main() -> None:
     setup_vad()
     setup_whisper(config)
     setup_llm(config)
-    setup_tts(config)
+    if config.tts_enabled:
+        setup_tts(config)
+    else:
+        print("\nSkipping TTS setup because tts_enabled is false.")
 
     print("\n" + "=" * 50)
     print("  Setup complete!")

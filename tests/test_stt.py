@@ -30,7 +30,7 @@ class FakeWhisperModel:
         return type(self).segments, {"ignored": True}
 
 
-def load_stt_module(monkeypatch):
+def load_stt_module(monkeypatch, cuda_available=False):
     FakeWhisperModel.init_calls = []
     FakeWhisperModel.segments = []
     install_module(
@@ -38,18 +38,38 @@ def load_stt_module(monkeypatch):
         "faster_whisper",
         make_module("faster_whisper", WhisperModel=FakeWhisperModel),
     )
+    install_module(
+        monkeypatch,
+        "torch",
+        make_module(
+            "torch",
+            cuda=make_module("torch.cuda", is_available=lambda: cuda_available),
+        ),
+    )
     return import_fresh("voice_chatbot.stt")
 
 
 def test_initialization_uses_cuda_when_enabled(monkeypatch):
-    module = load_stt_module(monkeypatch)
+    module = load_stt_module(monkeypatch, cuda_available=True)
 
     module.SpeechToText(
-        Config(language="en", whisper_model="small", whisper_gpu=True, whisper_n_threads=8)
+        Config(
+            language="en", whisper_model="small", whisper_gpu=True, whisper_n_threads=8
+        )
     )
 
     assert FakeWhisperModel.init_calls == [
         {"model_name": "small", "device": "cuda", "cpu_threads": 8}
+    ]
+
+
+def test_initialization_falls_back_to_cpu_when_cuda_is_unavailable(monkeypatch):
+    module = load_stt_module(monkeypatch, cuda_available=False)
+
+    module.SpeechToText(Config(language="en", whisper_model="small", whisper_gpu=True))
+
+    assert FakeWhisperModel.init_calls == [
+        {"model_name": "small", "device": "cpu", "cpu_threads": 4}
     ]
 
 
