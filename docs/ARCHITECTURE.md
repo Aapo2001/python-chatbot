@@ -8,6 +8,8 @@ Primary pipeline:
 
 `AudioIO` -> `VoiceActivityDetector` -> `SpeechToText` -> `ChatLLM` -> `TextToSpeech` -> `AudioIO.play_audio`
 
+Full documentation: [docs-site-kappa-coral.vercel.app](https://docs-site-kappa-coral.vercel.app)
+
 ## Entry Points
 
 ### `voice_chatbot/app.py`
@@ -17,6 +19,8 @@ Desktop UI built with PySide6.
 - `MainWindow` builds the settings sidebar, chat view, log view, and toolbar controls.
 - `ChatbotWorker` runs model initialization and the audio loop on a background `QThread`.
 - `LogStream` redirects `stdout` and `stderr` into the GUI log panel.
+- Text input bar allows sending messages directly to the LLM.
+- TTS can be toggled on/off in settings without restarting.
 
 This is the main operational interface for the project.
 
@@ -28,15 +32,6 @@ Terminal runner for the same pipeline.
 - prints status and chat messages to the console
 - loops until interrupted with `Ctrl+C`
 - loads persisted settings through `Config.load()`
-
-### `voice_chatbot_ros/node.py`
-
-ROS 2 Humble integration node.
-
-- exposes text and status topics over `rclpy`
-- optionally runs the microphone, VAD, and STT loop in a background thread
-- reuses the same `ChatLLM` and `TextToSpeech` wrappers as the desktop and CLI entry points
-- offers a `clear_history` service for resetting the in-memory conversation state
 
 ## Module Responsibilities
 
@@ -92,14 +87,21 @@ Wraps `llama_cpp.Llama` for chat completion.
 - stores alternating user and assistant messages
 - trims history to `max_conversation_turns * 2` messages
 
-`clear_history()` exists but is not called from the GUI controls.
-
 ### `voice_chatbot/tts_engine.py`
 
 Loads Coqui TTS and synthesizes speech to a NumPy array.
 
 - initializes `TTS(model_name=..., gpu=...)`
 - exposes `synthesize(text)` returning `(audio, sample_rate)`
+- includes a compatibility patch for transformers 5.x
+
+### `voice_chatbot/ui_common.py`
+
+Shared PySide6 UI components including the settings sidebar panel.
+
+### `voice_chatbot/platform_setup.py`
+
+CUDA DLL path setup and PySide6 DLL workarounds.
 
 ### `voice_chatbot/setup_models.py`
 
@@ -141,19 +143,10 @@ There are two distinct kinds of state:
 
 The GUI "clear chat" action affects only the rendered chat panel. It does not clear the in-memory conversation history held by the active `ChatLLM` instance.
 
-The ROS node can clear the same in-memory history through `~/clear_history`.
-
 ## Platform Assumptions
 
 The code assumes Windows-oriented CUDA setup:
 
 - `app.py` and `chatbot.py` add DLL directories before importing CUDA-dependent libraries
 - the fallback path is `D:\cuda`
-- `install.bat` targets CUDA 12.8 wheels for PyTorch and CUDA-enabled local builds for native packages
-
-## Notable Gaps
-
-- no automated tests
-- no device selection UI or config for audio input/output
-- no streaming token generation or streaming TTS
-- no explicit cancellation once a single LLM or TTS request is in progress
+- the install scripts target CUDA 12.8 wheels for PyTorch

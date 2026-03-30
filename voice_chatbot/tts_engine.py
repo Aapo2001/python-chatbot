@@ -22,7 +22,7 @@ try:
     import transformers.pytorch_utils as _pt_utils
     if not hasattr(_pt_utils, "isin_mps_friendly"):
         _pt_utils.isin_mps_friendly = torch.isin
-except ImportError:
+except Exception:
     pass
 
 from TTS.api import TTS

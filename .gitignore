@@ -26,6 +26,9 @@ __pycache__/
 *.swp
 *.swo
 
+# Coverage
+.coverage
+
 # Debug / temp output
 qt_debug.txt
 

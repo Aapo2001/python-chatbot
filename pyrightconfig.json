@@ -1,21 +1,7 @@
 {
   "include": [
-    "app.py",
-    "audio_io.py",
-    "chatbot.py",
-    "config.py",
-    "launch",
-    "llm.py",
-    "platform_setup.py",
-    "ros_app.py",
-    "setup.py",
-    "setup_models.py",
-    "stt.py",
-    "tts_engine.py",
-    "ui_common.py",
-    "vad.py",
     "voice_chatbot",
-    "voice_chatbot_ros"
+    "tests"
   ],
   "exclude": [
     "**/__pycache__",
@@ -26,12 +12,10 @@
     ".tmp_basedpyright",
     ".tmp_setuptools_probe*",
     "build",
-    "docs",
+    "dist",
     "install",
     "log",
-    "models",
-    "resource",
-    "venv"
+    "models"
   ],
   "venvPath": ".pixi/envs",
   "venv": "default",

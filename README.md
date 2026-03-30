@@ -4,6 +4,8 @@ Local speech-to-speech voice assistant with PySide6 GUI and CLI. Captures microp
 
 Available on PyPI: `pip install voice-chatbot[all]`
 
+**[Documentation](https://docs-site-kappa-coral.vercel.app)** | **[PyPI](https://pypi.org/project/voice-chatbot/)**
+
 ## Pipeline
 
 ```
