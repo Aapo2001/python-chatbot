@@ -15,6 +15,13 @@ setup_espeak()
 
 import numpy as np
 import torch
+
+# Patch transformers compatibility: coqui-tts imports isin_mps_friendly
+# which may not exist in older transformers versions.
+import transformers.pytorch_utils as _pt_utils
+if not hasattr(_pt_utils, "isin_mps_friendly"):
+    _pt_utils.isin_mps_friendly = torch.isin
+
 from TTS.api import TTS
 
 from .config import Config
