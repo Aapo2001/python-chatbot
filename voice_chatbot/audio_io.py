@@ -16,12 +16,41 @@ Typical lifecycle::
     audio.close()
 """
 
+import importlib
 import queue
+import sys
 
 import numpy as np
-import sounddevice as sd
 
 from .config import Config
+from .errors import AudioDependencyError
+
+
+def _load_sounddevice():
+    """Import ``sounddevice`` and raise a user-facing error on missing backend libs."""
+    try:
+        return importlib.import_module("sounddevice")
+    except ModuleNotFoundError as exc:
+        raise AudioDependencyError(
+            "Python-paketti 'sounddevice' puuttuu.\n"
+            "Aja ensin: pixi run install-python-deps"
+        ) from exc
+    except OSError as exc:
+        if "PortAudio library not found" not in str(exc):
+            raise
+
+        help_lines = ["PortAudio-kirjastoa ei loytynyt, joten audio I/O ei kaynnisty."]
+        if sys.platform.startswith("linux"):
+            help_lines.append("Pixi-asennuksessa korjaus on: pixi install")
+            help_lines.append(
+                "Jos kaytat pip-asennusta ilman pixia, asenna myos jarjestelman "
+                "PortAudio-paketti (esim. libportaudio2)."
+            )
+
+        raise AudioDependencyError("\n".join(help_lines)) from exc
+
+
+sd = _load_sounddevice()
 
 
 class AudioIO:

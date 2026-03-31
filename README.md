@@ -39,6 +39,9 @@ pixi run app
 
 - Python 3.11+
 - CUDA-capable GPU (recommended for real-time inference)
+- PortAudio runtime for microphone/playback
+  - Linux + pixi: installed automatically by `pixi install`
+  - Linux + pip: install the system package first, for example `sudo apt install libportaudio2`
 - espeak-ng (required for Coqui TTS phonemisation)
   - Windows: install to `C:\Program Files\eSpeak NG`
   - Linux: `sudo apt install espeak-ng`

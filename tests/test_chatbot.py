@@ -7,6 +7,7 @@ import pytest
 
 import voice_chatbot.platform_setup as platform_setup
 from voice_chatbot.config import Config
+from voice_chatbot.errors import AudioDependencyError
 
 
 def _import_chatbot_module(
@@ -202,3 +203,32 @@ def test_audio_is_closed_when_pipeline_raises(
         chatbot.run()
 
     assert state["audio"].closed is True
+
+
+def test_main_prints_friendly_audio_dependency_error(
+    monkeypatch, fresh_import, module_factory, capsys
+):
+    monkeypatch.setattr(platform_setup, "setup_cuda", lambda: None)
+
+    config_module = importlib.import_module("voice_chatbot.config")
+    monkeypatch.setattr(config_module.Config, "load", classmethod(lambda cls: Config()))
+
+    class FailingAudioIO:
+        def __init__(self, config):
+            raise AudioDependencyError("PortAudio puuttuu")
+
+    module = fresh_import(
+        "voice_chatbot.chatbot",
+        stub_modules={
+            "voice_chatbot.audio_io": module_factory(
+                "voice_chatbot.audio_io", AudioIO=FailingAudioIO
+            )
+        },
+        clear_modules=["voice_chatbot.chatbot"],
+    )
+
+    module.main()
+
+    output = capsys.readouterr().out
+    assert "VIRHE:" in output
+    assert "PortAudio puuttuu" in output

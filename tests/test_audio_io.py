@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 
 from voice_chatbot.config import Config
+from voice_chatbot.errors import AudioDependencyError
 
 from .conftest import import_fresh, install_module, make_module
 
@@ -110,3 +112,19 @@ def test_play_audio_delegates_to_sounddevice(monkeypatch):
 
     assert state["played"] == [(samples, 22050)]
     assert state["waited"] == 1
+
+
+def test_import_raises_friendly_error_when_portaudio_is_missing(monkeypatch):
+    import importlib
+
+    original_import_module = importlib.import_module
+
+    def fake_import_module(name, package=None):
+        if name == "sounddevice":
+            raise OSError("PortAudio library not found")
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    with pytest.raises(AudioDependencyError, match="PortAudio"):
+        import_fresh("voice_chatbot.audio_io")

@@ -37,6 +37,7 @@ def load_app_module(monkeypatch):
             "voice_chatbot.platform_setup",
             setup_cuda=lambda: None,
             setup_pyside6=lambda: None,
+            setup_wsl_audio=lambda: None,
         ),
     )
     install_module(

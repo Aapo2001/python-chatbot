@@ -14,17 +14,19 @@ from .platform_setup import setup_cuda, setup_wsl_audio
 setup_wsl_audio()   # must be before AudioIO import (PortAudio ALSA init)
 setup_cuda()
 
-from .audio_io import AudioIO
 from .config import Config
-from .llm import ChatLLM
-from .stt import SpeechToText
-from .vad import VoiceActivityDetector
+from .errors import AudioDependencyError
 
 
 class VoiceChatbot:
     """Synchronous voice chatbot — loads all models and runs an audio loop."""
 
     def __init__(self) -> None:
+        from .audio_io import AudioIO
+        from .llm import ChatLLM
+        from .stt import SpeechToText
+        from .vad import VoiceActivityDetector
+
         self._config = Config.load()
 
         print("=" * 50)
@@ -92,8 +94,11 @@ class VoiceChatbot:
 
 
 def main() -> None:
-    chatbot = VoiceChatbot()
-    chatbot.run()
+    try:
+        chatbot = VoiceChatbot()
+        chatbot.run()
+    except AudioDependencyError as exc:
+        print(f"VIRHE:\n{exc}")
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import Config
+from .errors import AudioDependencyError
 from .ui_common import (
     APP_STYLESHEET,
     SettingsPanel,
@@ -190,6 +191,8 @@ class ChatbotWorker(QThread):
                     vad.reset()
                     self.status_changed.emit("Kuunnellaan...")
 
+        except AudioDependencyError as exc:
+            self.error_occurred.emit(str(exc))
         except Exception:
             self.error_occurred.emit(traceback.format_exc())
         finally:
