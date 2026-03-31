@@ -9,8 +9,9 @@ Usage::
     python -m voice_chatbot.chatbot
 """
 
-from .platform_setup import setup_cuda
+from .platform_setup import setup_cuda, setup_wsl_audio
 
+setup_wsl_audio()   # must be before AudioIO import (PortAudio ALSA init)
 setup_cuda()
 
 from .audio_io import AudioIO

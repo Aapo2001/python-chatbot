@@ -86,3 +86,82 @@ def setup_espeak() -> None:
         os.environ["PATH"] = (
             espeak_dir if not path_value else espeak_dir + os.pathsep + path_value
         )
+
+
+def is_wsl() -> bool:
+    """Return True if running inside WSL (any version)."""
+    try:
+        with open("/proc/version") as f:
+            content = f.read().lower()
+        return "microsoft" in content or "wsl" in content
+    except OSError:
+        return False
+
+
+def get_wsl_version() -> int:
+    """Return WSL version: 2, 1, or 0 (not WSL)."""
+    if not is_wsl():
+        return 0
+    # WSL2 has a real Linux kernel — /run/user/ is created by systemd/logind
+    if os.path.isdir("/run/user") and os.environ.get("WSL_DISTRO_NAME"):
+        return 2
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return 1
+    return 2  # /proc/version says microsoft but no distro var — assume WSL2
+
+
+def setup_wsl_audio() -> None:
+    """Configure ALSA → PulseAudio routing for WSL2/WSLg.
+
+    Writes ~/.asoundrc if it does not already exist (or lacks pulse routing).
+    Safe to call on non-WSL systems (no-ops immediately).
+    Must be called before any sounddevice import (PortAudio probes ALSA
+    at library load time).
+    """
+    import warnings
+
+    if not is_wsl():
+        return
+
+    if get_wsl_version() == 1:
+        warnings.warn(
+            "[WSL Audio] WSL1 does not support audio hardware. "
+            "Upgrade to WSL2 with WSLg for microphone/speaker access.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return
+
+    if not os.environ.get("PULSE_SERVER"):
+        warnings.warn(
+            "[WSL Audio] PULSE_SERVER is not set — WSLg may not be active. "
+            "Audio will likely fail. Ensure you are running WSL2 with WSLg "
+            "(Windows 11 build 22000+ or Windows 10 with WSLg preview). "
+            "If needed, run: export PULSE_SERVER=/run/user/$(id -u)/pulse/native",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    asoundrc = Path.home() / ".asoundrc"
+    marker = "pcm.default pulse"
+    content = (
+        "# Added by voice-chatbot WSL audio setup\n"
+        "# Routes ALSA default device to PulseAudio (WSLg).\n"
+        "pcm.default pulse\n"
+        "ctl.default pulse\n"
+    )
+
+    if asoundrc.exists():
+        existing = asoundrc.read_text(encoding="utf-8", errors="replace")
+        if marker in existing:
+            return  # already configured, idempotent
+        warnings.warn(
+            f"[WSL Audio] ~/.asoundrc already exists with custom content.\n"
+            f"Add the following lines manually to enable PulseAudio routing:\n\n{content}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return
+
+    asoundrc.write_text(content, encoding="utf-8")
+    print("[WSL Audio] Wrote ~/.asoundrc to route ALSA → PulseAudio (WSLg).")

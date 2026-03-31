@@ -16,8 +16,9 @@ import threading
 import traceback
 from pathlib import Path
 
-from .platform_setup import setup_cuda, setup_pyside6
+from .platform_setup import setup_cuda, setup_pyside6, setup_wsl_audio
 
+setup_wsl_audio()   # before sounddevice (PortAudio ALSA init)
 setup_pyside6()
 setup_cuda()
 
