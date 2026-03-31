@@ -11,6 +11,9 @@ duplicated across every entry point:
    pip-installed PySide6 Qt runtime over the one shipped by Robostack.
 3. **espeak-ng PATH** – append the default Windows install directory
    so Coqui TTS can find the phonemiser backend.
+4. **Linux C++ runtime preload** – preload the Pixi/conda ``libstdc++``
+   so PyTorch does not lock the process to an older system ABI before
+   Coqui TTS pulls in Python's ``sqlite3`` extension.
 
 Usage — call the functions you need at the **top** of each entry point,
 **before** importing any CUDA-backed or Qt library::
@@ -21,9 +24,52 @@ Usage — call the functions you need at the **top** of each entry point,
     setup_pyside6()   # before PySide6 widget imports
 """
 
+import ctypes
 import os
 import sys
 from pathlib import Path
+
+
+_LINUX_CXX_RUNTIME_READY = False
+
+
+def setup_linux_cxx_runtime() -> None:
+    """Preload Pixi/conda C++ runtime libraries on Linux.
+
+    PyTorch can eagerly load the system ``libstdc++.so.6``. Later, when
+    Python's ``_sqlite3`` extension pulls in the conda-forge ICU stack,
+    the process may fail with a missing ``CXXABI_*`` symbol because the
+    system ``libstdc++`` is older than the one bundled in the Pixi env.
+
+    Preloading the environment's C++ runtime early keeps the process on
+    a consistent ABI for subsequent native imports.
+    """
+    global _LINUX_CXX_RUNTIME_READY
+
+    if _LINUX_CXX_RUNTIME_READY or sys.platform != "linux":
+        return
+
+    prefix = os.environ.get("CONDA_PREFIX")
+    if not prefix:
+        return
+
+    lib_dir = Path(prefix) / "lib"
+    if not lib_dir.is_dir():
+        return
+
+    loaded_any = False
+    for name in ("libstdc++.so.6", "libgcc_s.so.1"):
+        lib_path = lib_dir / name
+        if not lib_path.is_file():
+            continue
+        try:
+            ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+            loaded_any = True
+        except OSError:
+            continue
+
+    if loaded_any:
+        _LINUX_CXX_RUNTIME_READY = True
 
 
 def setup_cuda() -> None:
@@ -31,8 +77,10 @@ def setup_cuda() -> None:
 
     Reads ``CUDA_PATH`` (default ``D:\\cuda``) and adds ``bin/x64`` and
     ``bin`` subdirectories to the DLL search path.  Safe to call on
-    Linux (no-ops if ``os.add_dll_directory`` is unavailable).
+    Linux, where it also preloads the Pixi/conda C++ runtime so native
+    extensions agree on the same ``libstdc++`` ABI.
     """
+    setup_linux_cxx_runtime()
     if not hasattr(os, "add_dll_directory"):
         return
     cuda_path = os.environ.get("CUDA_PATH", r"D:\cuda")

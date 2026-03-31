@@ -3,6 +3,32 @@ import os
 from voice_chatbot import platform_setup
 
 
+def test_setup_linux_cxx_runtime_preloads_conda_libraries(monkeypatch, tmp_path):
+    prefix = tmp_path / "env"
+    lib_dir = prefix / "lib"
+    lib_dir.mkdir(parents=True)
+    for name in ("libstdc++.so.6", "libgcc_s.so.1"):
+        (lib_dir / name).write_text("", encoding="utf-8")
+
+    loaded = []
+    monkeypatch.setattr(platform_setup.sys, "platform", "linux")
+    monkeypatch.setenv("CONDA_PREFIX", str(prefix))
+    monkeypatch.setattr(
+        platform_setup.ctypes,
+        "CDLL",
+        lambda path, mode=None: loaded.append((path, mode)),
+    )
+    monkeypatch.setattr(platform_setup, "_LINUX_CXX_RUNTIME_READY", False)
+
+    platform_setup.setup_linux_cxx_runtime()
+
+    assert loaded == [
+        (str(lib_dir / "libstdc++.so.6"), platform_setup.ctypes.RTLD_GLOBAL),
+        (str(lib_dir / "libgcc_s.so.1"), platform_setup.ctypes.RTLD_GLOBAL),
+    ]
+    assert platform_setup._LINUX_CXX_RUNTIME_READY is True
+
+
 def test_setup_cuda_adds_existing_cuda_directories(monkeypatch):
     added = []
     cuda_root = r"C:\CUDA"
@@ -21,6 +47,7 @@ def test_setup_cuda_adds_existing_cuda_directories(monkeypatch):
         "isdir",
         lambda path: path in {cuda_bin_x64, cuda_bin},
     )
+    monkeypatch.setattr(platform_setup, "setup_linux_cxx_runtime", lambda: None)
 
     platform_setup.setup_cuda()
 
